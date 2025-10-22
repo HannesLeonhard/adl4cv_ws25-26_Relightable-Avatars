@@ -1,1 +1,1 @@
-# adl4cv_ws25-26_Relightable-Avatars
+# Relightable Avatars from Material-Aware Diffusion Models
