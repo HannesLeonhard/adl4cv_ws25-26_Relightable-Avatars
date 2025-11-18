@@ -1,34 +1,35 @@
+import PIL
 import torch
 import torchvision
-from rgbx.external.diffusers import DDIMScheduler
-from rgbx.external.rgb2x.load_image import load_exr_image, load_ldr_image
-from rgbx.external.rgb2x.pipeline_rgb2x import StableDiffusionAOVMatEstPipeline
-import PIL
+from diffusers import DDIMScheduler
+from external.rgbx.rgb2x.load_image import load_ldr_image
+from external.rgbx.rgb2x.pipeline_rgb2x import StableDiffusionAOVMatEstPipeline
+
+from rgbx.util import save_intrinsic_channels
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def build_rgbx_pipeline(
-    model_cache: str
-) -> StableDiffusionAOVMatEstPipeline:
+
+def build_rgbx_pipeline(model_cache: str) -> StableDiffusionAOVMatEstPipeline:
     pipe = StableDiffusionAOVMatEstPipeline.from_pretrained(
         "zheng95z/rgb-to-x",
         torch_dtype=torch.float16,
         cache_dir=model_cache,
     )
     pipe.scheduler = DDIMScheduler.from_config(
-    pipe.scheduler.config, rescale_betas_zero_snr=True, timestep_spacing="trailing"
+        pipe.scheduler.config, rescale_betas_zero_snr=True, timestep_spacing="trailing"
     )
     pipe.set_progress_bar_config(disable=False)
     pipe = pipe.to(device)
     return pipe
 
+
 def infer_intrinsic_channels(
     image_path: str,
     pipe: StableDiffusionAOVMatEstPipeline,
     inference_steps: int = 50,
-    seed: int = 0
+    seed: int = 0,
 ) -> dict[str, PIL.Image]:
-    
     generator = torch.Generator(device=device).manual_seed(seed)
     photo = load_ldr_image(image_path)
 
@@ -42,7 +43,7 @@ def infer_intrinsic_channels(
     }
 
     intrinsic_channels = {
-        "rgb" : torchvision.transforms.functional.to_pil_image(photo, mode=None)
+        "rgb": torchvision.transforms.functional.to_pil_image(photo, mode=None)
     }
 
     for aov_name in required_aovs:
@@ -56,7 +57,21 @@ def infer_intrinsic_channels(
             generator=generator,
             required_aovs=[aov_name],
         ).images[0][0]
-    
+
         intrinsic_channels[aov_name] = generated_image
 
     return intrinsic_channels
+
+
+if __name__ == "__main__":
+    pipe = build_rgbx_pipeline("/home/jonathansickert/git/rgbx/rgb2x/model_cache")
+
+    intrinsic_channels = infer_intrinsic_channels(
+        "/home/jonathansickert/git/rgbx/data/1.png", pipe=pipe
+    )
+
+    save_intrinsic_channels(
+        intrinsic_channels=intrinsic_channels,
+        name="1",
+        save_dir="/home/jonathansickert/git/adl4cv_ws25-26_Relightable-Avatars/rgbx/output",
+    )
