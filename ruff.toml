@@ -1,4 +1,4 @@
-extend-exclude = ["*.ipynb", "typings"]
+extend-exclude = ["*.ipynb", "typings", "external"]
 fix = true
 target-version = "py39"
 

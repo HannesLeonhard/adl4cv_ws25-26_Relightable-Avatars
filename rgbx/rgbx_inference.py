@@ -5,8 +5,6 @@ from diffusers import DDIMScheduler
 from external.rgbx.rgb2x.load_image import load_ldr_image
 from external.rgbx.rgb2x.pipeline_rgb2x import StableDiffusionAOVMatEstPipeline
 
-from rgbx.util import save_intrinsic_channels
-
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
@@ -61,17 +59,3 @@ def infer_intrinsic_channels(
         intrinsic_channels[aov_name] = generated_image
 
     return intrinsic_channels
-
-
-if __name__ == "__main__":
-    pipe = build_rgbx_pipeline("/home/jonathansickert/git/rgbx/rgb2x/model_cache")
-
-    intrinsic_channels = infer_intrinsic_channels(
-        "/home/jonathansickert/git/rgbx/data/1.png", pipe=pipe
-    )
-
-    save_intrinsic_channels(
-        intrinsic_channels=intrinsic_channels,
-        name="1",
-        save_dir="/home/jonathansickert/git/adl4cv_ws25-26_Relightable-Avatars/rgbx/output",
-    )
