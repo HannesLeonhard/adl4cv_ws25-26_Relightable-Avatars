@@ -1,0 +1,35 @@
+extend-exclude = ["*.ipynb", "typings"]
+fix = true
+target-version = "py39"
+
+[lint]
+extend-select = [
+    "E",     # pycodestyle errors
+    "F",     # pyflakes
+    "I",     # Missing required import (auto-fixable)
+    "UP",    # Pyupgrade
+    "SIM",   # flake8-simplify
+    "C90",   # mccabe complexity
+    "W",     # pycodestyle warnings
+    "C4",    # flake8-comprehensions
+    "B",     # flake8-bugbear
+    "A",     # flake-builtins
+    "COM",   # flake-commas
+    "NPY",   # NumPy-specific rules
+    "YTT",   # flake8-2020
+    "ASYNC", # flake8-async
+    "T10",   # flake8-debugger (T10)
+    "DJ",    # flake8-django (DJ)
+    "FA",    # flake8-future-annotations (FA)
+    "ICN",   # flake8-import-conventions (ICN)
+    "LOG",   # flake8-logging (LOG)
+    "PIE",   # flake8-pie (PIE)
+    "Q",     # flake8-quotes (Q)
+    "RSE",   # flake8-raise (RSE)
+    "SLOT",  # flake8-slots (SLOT)
+    "FLY",   # flynt (FLY)
+    "AIR",   # Airflow (AIR)
+    "FURB",  # refurb (FURB),
+    "RUF",   # Ruff-specific rules (RUF)
+]
+ignore = ["FA102", "COM812"]
