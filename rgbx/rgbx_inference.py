@@ -91,6 +91,15 @@ def infer_intrinsic_channels(
 def infer_intrinsic_channels_for_dataset(
     dataset_path: str, save_dir: str, model_cache: str
 ) -> None:
+    """
+    Run intrinsic channel inference on all images in a dataset and save the results.
+
+    Parameters:
+        dataset_path (str): Directory containing input .png images.
+        save_dir (str): Directory where the inferred intrinsic channels will be saved.
+        model_cache (str): Directory used to cache or load the RGB-to-X model.
+    """
+
     relevant_files = Path(dataset_path).glob("*.png")
 
     pipe = build_rgbx_pipeline(model_cache)
