@@ -1,6 +1,7 @@
 extend-exclude = ["*.ipynb", "typings", "external"]
 fix = true
 target-version = "py39"
+line-length = 100
 
 [lint]
 extend-select = [
