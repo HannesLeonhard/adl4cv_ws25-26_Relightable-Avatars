@@ -4,9 +4,9 @@ import PIL
 import torch
 import torchvision
 from diffusers import DDIMScheduler
-from external.rgbx.rgb2x.load_image import load_ldr_image
-from external.rgbx.rgb2x.pipeline_rgb2x import StableDiffusionAOVMatEstPipeline
-from util import save_intrinsic_channels
+from rgbx.rgb2x.load_image import load_ldr_image
+from rgbx.rgb2x.pipeline_rgb2x import StableDiffusionAOVMatEstPipeline
+from scripts.util import save_intrinsic_channels
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 

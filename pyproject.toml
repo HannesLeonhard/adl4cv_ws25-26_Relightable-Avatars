@@ -4,4 +4,4 @@ version = "0.1.0"
 dependencies = []
 
 [tool.setuptools]
-packages = ["rgbx"]
+packages = ["scripts", "rgbx"]
