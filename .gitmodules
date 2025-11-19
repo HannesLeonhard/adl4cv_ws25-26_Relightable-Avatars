@@ -1,3 +1,6 @@
-[submodule "diffusion_renderer/external/diffusion_renderer"]
-	path = diffusion_renderer/external/diffusion_renderer
+[submodule "rgbx"]
+	path = rgbx
+	url = https://github.com/jonathansickert/rgbx.git
+[submodule "diffusion-renderer"]
+	path = diffusion-renderer
 	url = https://github.com/jonathansickert/diffusion-renderer.git
