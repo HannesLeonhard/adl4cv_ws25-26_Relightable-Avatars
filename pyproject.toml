@@ -4,4 +4,4 @@ version = "0.1.0"
 dependencies = []
 
 [tool.setuptools]
-packages = ["scripts", "rgbx", "diffusion_renderer"]
+packages = ["scripts", "rgbx"]
