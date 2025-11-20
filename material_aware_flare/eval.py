@@ -11,62 +11,83 @@ from .utils import convert_rgba_to_rgb_pil
 
 
 def calculate_metrics(
-    gen_pil, gt_pil, lpips_model, lpips_transform, device, model_dtype=None
+    gen_pil,
+    gt_pil,
+    lpips_model,
+    lpips_transform,
+    device,
+    mask_np,
+    model_dtype=None
 ):
     """
-    Calculates PSNR, SSIM, and LPIPS with individual error handling.
-    Returns (psnr_val, ssim_val, lpips_val).
-    Returns None for a metric if calculation fails.
+    Calculates PSNR, SSIM, and LPIPS inside masked image regions.
+    Mask is (H, W, 3) float in [0,1], soft mask supported.
     """
     psnr_val, ssim_val, lpips_val = None, None, None
 
     try:
         gen_pil_rgb = convert_rgba_to_rgb_pil(gen_pil, background_color=(0, 0, 0))
         gt_pil_rgb = convert_rgba_to_rgb_pil(gt_pil, background_color=(0, 0, 0))
-
-        # Convert to Numpy for PSNR/SSIM
-        gen_np = np.array(gen_pil_rgb).astype(np.uint8)
-        gt_np = np.array(gt_pil_rgb).astype(np.uint8)
-
+        gen_np = np.array(gen_pil_rgb).astype(np.float32)
+        gt_np = np.array(gt_pil_rgb).astype(np.float32)
         if gen_np.shape != gt_np.shape:
             gt_pil_rgb = gt_pil_rgb.resize(gen_pil_rgb.size, Image.LANCZOS)
-            gt_np = np.array(gt_pil_rgb).astype(np.uint8)
-
-        # Calculate PSNR
+            gt_np = np.array(gt_pil_rgb).astype(np.float32)
+        # mask_np: (H, W, 3) float, convert to single channel
+        if mask_np.ndim == 3 and mask_np.shape[-1] == 3:
+            mask = mask_np.mean(axis=-1)  # (H,W)
+        else:
+            mask = mask_np
+        mask = mask.astype(np.float32)
+        if mask.shape != gen_np.shape[:2]:
+            raise ValueError(f"Mask shape {mask.shape} does not match image {gen_np.shape[:2]}")
+        mask_3c = np.repeat(mask[..., None], 3, axis=-1)
+        gen_m = gen_np * mask_3c
+        gt_m = gt_np * mask_3c
         try:
-            psnr_val = psnr(gen_np, gt_np, data_range=255)
+            # For masked PSNR, compute MSE only inside mask
+            diff = (gen_m - gt_m) ** 2
+            mse = diff.sum() / (mask_3c.sum() * 3 + 1e-8)
+
+            if mse > 0:
+                psnr_val = 10 * np.log10(255 ** 2 / mse)
+            else:
+                psnr_val = float("inf")
+
         except Exception as e:
-            print(f"Failed to calculate PSNR: {e}")
-
-        # Calculate SSIM
+            print(f"PSNR failed: {e}")
         try:
+            gen_ssim = gen_m.astype(np.uint8)
+            gt_ssim = gt_m.astype(np.uint8)
+
             ssim_val = ssim(
-                gen_np, gt_np, data_range=255, channel_axis=-1, multichannel=True
+                gen_ssim,
+                gt_ssim,
+                data_range=255,
+                channel_axis=-1,
+                gaussian_weights=True,
             )
         except Exception as e:
-            print(f"Failed to calculate SSIM: {e}")
-
+            print(f"SSIM failed: {e}")
         try:
+            gen_t = lpips_transform(gen_pil_rgb).unsqueeze(0).to(device)
+            gt_t = lpips_transform(gt_pil_rgb).unsqueeze(0).to(device)
+
             if model_dtype:
-                gen_tensor = (
-                    lpips_transform(gen_pil_rgb).unsqueeze(0).to(device).to(model_dtype)
-                )
-                gt_tensor = (
-                    lpips_transform(gt_pil_rgb).unsqueeze(0).to(device).to(model_dtype)
-                )
-            else:
-                gen_tensor = lpips_transform(gen_pil_rgb).unsqueeze(0).to(device)
-                gt_tensor = lpips_transform(gt_pil_rgb).unsqueeze(0).to(device)
-
-            with torch.no_grad():
-                lpips_val = lpips_model(gen_tensor, gt_tensor).item()
+                gen_t = gen_t.to(model_dtype)
+                gt_t = gt_t.to(model_dtype)
+            # Apply mask: convert mask to torch and resize
+            mask_t = torch.from_numpy(mask).float().to(device)[None, None, :, :]
+            mask_t = torch.nn.functional.interpolate(mask_t, size=gen_t.shape[2:], mode="bilinear")
+            gen_t = gen_t * mask_t
+            gt_t = gt_t * mask_t
+            lpips_val = lpips_model(gen_t, gt_t).item()
         except Exception as e:
-            print(f"Failed to calculate LPIPS: {e}")
-
+            print(f"LPIPS failed: {e}")
     except Exception as e:
         print(f"General error in metric preprocessing: {e}")
-
     return psnr_val, ssim_val, lpips_val
+
 
 
 @torch.no_grad()
