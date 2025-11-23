@@ -1,4 +1,4 @@
-extend-exclude = ["*.ipynb", "typings", "external"]
+extend-exclude = ["*.ipynb", "typings", "flare", "rgbx", "diffusion_renderer"]
 fix = true
 target-version = "py39"
 line-length = 100

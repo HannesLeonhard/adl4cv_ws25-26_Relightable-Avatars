@@ -9,7 +9,8 @@ import torchvision
 
 
 def vizualize_intrinsic_channels(
-    intrinsic_channels: dict[str, PIL.Image], save_path: Optional[str] = None  # noqa: FA100
+    intrinsic_channels: dict[str, PIL.Image],
+    save_path: Optional[str] = None,  # noqa: FA100
 ) -> None:
     """
     Display and optionally save images of intrinsic channels.

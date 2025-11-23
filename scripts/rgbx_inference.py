@@ -58,7 +58,7 @@ def infer_intrinsic_channels(
     """
 
     generator = torch.Generator(device=device).manual_seed(seed)
-    photo = load_ldr_image(image_path)
+    photo = load_ldr_image(image_path, from_srgb=True)
 
     required_aovs = ["albedo", "normal", "roughness", "metallic", "irradiance"]
     prompts = {

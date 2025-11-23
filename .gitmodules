@@ -4,3 +4,6 @@
 [submodule "diffusion_renderer"]
 	path = diffusion_renderer
 	url = https://github.com/jonathansickert/diffusion-renderer.git
+[submodule "flare"]
+	path = flare
+	url = https://github.com/jonathansickert/flare.git
