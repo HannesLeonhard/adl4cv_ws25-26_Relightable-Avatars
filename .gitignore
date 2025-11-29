@@ -211,3 +211,7 @@ __marimo__/
 notebooks/model_cache_rgb_x/**
 notebooks/checkpoints/**
 
+
+# util files
+diffusionrenderer_001_mvi_1812_subset.csv
+
