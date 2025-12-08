@@ -8,10 +8,10 @@ def srgb_to_linear(img: torch.Tensor) -> torch.Tensor:
     Convert an image tensor from sRGB to linear RGB space.
 
     Parameters:
-        img (torch.Tensor): Input tensor in sRGB space, normalized to [0.0, 1.0].
+        img (torch.Tensor): Input tensor in sRGB space, normalized to [0, 1].
 
     Returns:
-        torch.Tensor: Tensor with linear RGB values, clamped to [0.0, 1.0].
+        torch.Tensor: Tensor with linear RGB values, clamped to [0, 1].
     """
 
     linear = torch.empty_like(img)
@@ -29,10 +29,10 @@ def linear_to_srgb(img: torch.Tensor) -> torch.Tensor:
     Convert an image tensor from linear RGB to sRGB space.
 
     Parameters:
-        img (torch.Tensor): Input tensor in linear RGB space, normalized to [0.0, 1.0].
+        img (torch.Tensor): Input tensor in linear RGB space, normalized to [0, 1].
 
     Returns:
-        torch.Tensor: Tensor with sRGB values, clamped to [0.0, 1.0].
+        torch.Tensor: Tensor with sRGB values, clamped to [0, 1].
     """
 
     srgb = torch.empty_like(img)
@@ -54,7 +54,7 @@ def load_img(path: str, from_srgb: bool = True) -> torch.Tensor:
         from_srgb (bool, optional): If True, converts from sRGB to linear RGB. Defaults to True.
 
     Returns:
-        torch.Tensor: Loaded image (C, H, W) as float32 in [0.0, 1.0] range.
+        torch.Tensor: Loaded image (C, H, W) as float32 in [0, 1] range.
     """
 
     image = torchvision.io.read_image(path)
@@ -86,7 +86,7 @@ def save_img(img: torch.Tensor, path: str, from_linear: bool = True):
     Save an image tensor, converting from linear RGB to sRGB if specified.
 
     Parameters:
-        img (torch.Tensor): Image tensor (C, H, W) in [0.0, 1.0] range.
+        img (torch.Tensor): Image tensor (C, H, W) in [0, 1] range.
         path (str): File path for saving (e.g., 'output.png').
         from_linear (bool, optional): If True, converts from linear to sRGB before saving.
     """
