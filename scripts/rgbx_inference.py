@@ -1,12 +1,16 @@
+from __future__ import annotations
+
+import os
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import PIL
 import torch
 import torchvision
 from diffusers import DDIMScheduler
-from rgbx.rgb2x.load_image import load_ldr_image
+
 from rgbx.rgb2x.pipeline_rgb2x import StableDiffusionAOVMatEstPipeline
-from scripts.util import save_intrinsic_channels
+from scripts.util import load_img, pil_to_normalized_tensor, save_img
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -58,7 +62,7 @@ def infer_intrinsic_channels(
     """
 
     generator = torch.Generator(device=device).manual_seed(seed)
-    photo = load_ldr_image(image_path, from_srgb=True)
+    photo = load_img(image_path)
 
     required_aovs = ["albedo", "normal", "roughness", "metallic", "irradiance"]
     prompts = {
@@ -86,6 +90,76 @@ def infer_intrinsic_channels(
         intrinsic_channels[aov_name] = generated_image
 
     return intrinsic_channels
+
+
+def vizualize_intrinsic_channels(
+    intrinsic_channels: dict[str, PIL.Image],
+    save_path: str | None = None,
+) -> None:
+    """
+    Display and optionally save images of intrinsic channels.
+
+    Parameters:
+        intrinsic_channels (dict[str, PIL.Image]): Dict mapping channel names to their images.
+        save_path : (str, optional): Path to save the visualization. If None, the plot is not saved.
+    """
+
+    plt.figure(figsize=(20 * 6, 20))
+
+    for i, (aov, image) in enumerate(intrinsic_channels.items()):
+        plt.subplot(1, 6, i + 1)
+        plt.imshow(image)
+        plt.title(aov)
+        plt.axis("off")
+
+    if save_path is not None:
+        plt.savefig(save_path)
+
+
+def save_intrinsic_channels(
+    intrinsic_channels: dict[str, PIL.Image], name: str, save_dir: str, from_linear: bool = True
+) -> None:
+    """
+    Save intrinsic channel images to a specified directory with a given name.
+
+    Parameters:
+        intrinsic_channels (dict[str, PIL.Image]): Dict mapping channel names to their images.
+        name (str): Prefix to use for saved image filenames.
+        save_dir (str): Directory path where images will be saved. Created if it does not exist.
+    """
+
+    if not Path(save_dir).exists():
+        os.makedirs(save_dir)
+
+    for aov, image in intrinsic_channels.items():
+        save_path: Path = Path(save_dir) / f"{name}.{aov}.png"
+        tensor = pil_to_normalized_tensor(image)
+        save_img(tensor, save_path, from_linear=from_linear)
+
+
+def apply_mask(intrinsic_channels: dict[str, PIL.Image], mask_path: str) -> dict[str, PIL.Image]:
+    """
+    Apply a mask to intrinsic channel images and return the masked images.
+
+    Parameters:
+        intrinsic_channels (dict[str, PIL.Image]): Dict mapping channel names to their images.
+        mask_path (str): Path to the mask image to apply.
+
+    Returns:
+        dict[str, PIL.Image]: Dict mapping channel names to their masked images.
+    """
+
+    masked_intrinsic_channels = {}
+    mask = torchvision.io.read_image(mask_path)
+    mask = mask.float() / 255.0
+
+    for aov, image in intrinsic_channels.items():
+        masked_image = pil_to_normalized_tensor(image) * mask
+        masked_intrinsic_channels[aov] = torchvision.transforms.functional.to_pil_image(
+            masked_image, mode=None
+        )
+
+    return masked_intrinsic_channels
 
 
 def infer_intrinsic_channels_for_dataset(
