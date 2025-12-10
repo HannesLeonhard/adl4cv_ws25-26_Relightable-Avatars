@@ -1,0 +1,7 @@
+[project]
+name = "material-aware-flare"
+version = "0.1.0"
+dependencies = []
+
+[tool.setuptools]
+packages = ["scripts", "rgbx"]
