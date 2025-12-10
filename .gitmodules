@@ -1,9 +1,12 @@
-[submodule "rgbx"]
-	path = rgbx
-	url = https://github.com/jonathansickert/rgbx.git
-[submodule "diffusion_renderer"]
-	path = diffusion_renderer
-	url = https://github.com/jonathansickert/diffusion-renderer.git
 [submodule "flare"]
 	path = flare
 	url = https://github.com/jonathansickert/flare.git
+[submodule "external/flare_adl4cv"]
+	path = external/flare_adl4cv
+	url = https://github.com/HannesLeonhard/flare_adl4cv.git
+[submodule "external/rgbx"]
+	path = external/rgbx
+	url = https://github.com/jonathansickert/rgbx.git
+[submodule "external/diffusion-renderer"]
+	path = external/diffusion-renderer
+	url = https://github.com/jonathansickert/diffusion-renderer.git

@@ -3,14 +3,14 @@ from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-import nvdiffrec.render.light as light
+import external.flare_adl4cv.nvdiffrec.render.light as light
 import torch
-from flame.FLAME import FLAME
+from external.flare_adl4cv.flame.FLAME import FLAME
 
-from flare.core import Mesh, Renderer
-from flare.dataset import DatasetLoader
-from flare.modules import ForwardDeformer, NeuralShader, get_deformer_network
-from flare.utils import AABB, read_mesh
+from external.flare_adl4cv.flare.core import Mesh, Renderer
+from external.flare_adl4cv.flare.dataset import DatasetLoader
+from external.flare_adl4cv.flare.modules import ForwardDeformer, NeuralShader, get_deformer_network
+from external.flare_adl4cv.flare.utils import AABB, read_mesh
 
 device = torch.device("cuda:0")
 
