@@ -9,7 +9,7 @@ import torch
 import torchvision
 from diffusers import DDIMScheduler
 
-from rgbx.rgb2x.pipeline_rgb2x import StableDiffusionAOVMatEstPipeline
+from external.rgbx.rgb2x.pipeline_rgb2x import StableDiffusionAOVMatEstPipeline
 from scripts.util import load_img, pil_to_normalized_tensor, save_img
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
