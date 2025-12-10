@@ -23,9 +23,9 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 module_path = os.path.join(current_dir, 'external', 'diffusion-renderer')
 if module_path not in sys.path:
     sys.path.append(module_path)
-from src.pipelines.pipeline_rgbx import RGBXVideoDiffusionPipeline
-from utils.utils_rgbx import convert_rgba_to_rgb_pil
-from utils.utils_rgbx_inference import (
+from external.diffusion_renderer.src.pipelines.pipeline_rgbx import RGBXVideoDiffusionPipeline
+from external.diffusion_renderer.utils.utils_rgbx import convert_rgba_to_rgb_pil
+from external.diffusion_renderer.utils.utils_rgbx_inference import (
     touch, 
     find_images_recursive, 
     base_plus_ext,
