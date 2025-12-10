@@ -1,13 +1,15 @@
-import torch
-import matplotlib.pyplot as plt
-import numpy as np
+import types
 from typing import Optional
 
-from flame.FLAME import FLAME
-from flare.dataset import DatasetLoader
-from flare.core import Mesh, Renderer
-from flare.modules import NeuralShader, get_deformer_network, ForwardDeformer
+import matplotlib.pyplot as plt
+import numpy as np
 import nvdiffrec.render.light as light
+import torch
+from flame.FLAME import FLAME
+
+from flare.core import Mesh, Renderer
+from flare.dataset import DatasetLoader
+from flare.modules import ForwardDeformer, NeuralShader, get_deformer_network
 from flare.utils import AABB, read_mesh
 
 device = torch.device("cuda:0")
@@ -210,6 +212,7 @@ def prepare_mask_for_metrics(pred: torch.Tensor, views: dict[str, torch.Tensor])
     assert (masked_gt == masked_gt * mask).all()
 
     # consider only relevant areas, i.e neglect clothing
+    # see flare/dataset/dataset_util.py:_load_semantics
     mask_cloth = semantics[..., 4:5]
     mask = mask * (1 - mask_cloth)
 
@@ -223,3 +226,103 @@ def prepare_mask_for_metrics(pred: torch.Tensor, views: dict[str, torch.Tensor])
     mask = mask.permute(0, 3, 1, 2)
 
     return masked_gt, masked_pred, mask
+
+
+@torch.no_grad()
+def patched_flare_inference(
+    views,
+    mesh: Mesh,
+    FLAMEServer: FLAME,
+    deformer_net: ForwardDeformer,
+    renderer: Renderer,
+    channels_gbuffer: list[str],
+    lgt: light.EnvironmentLight,
+    shader_path: str,
+    ghostbone: bool = True,
+    finetune_color: bool = True,
+    new_albedo: Optional[torch.Tensor] = None,
+    new_roughness: Optional[torch.Tensor] = None,
+):
+    patched_shader = NeuralShader.load(shader_path, device=device)
+    patched_shader.eval()
+
+    # copy from flare/modules/neuralshader.py
+    def _forward(
+        self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None
+    ):
+        bz, h, w, ch = position.shape
+        pe_input = self.apply_pe(position=position)
+
+        view_dir = view_direction[:, None, None, :]
+        normal_bend = self.get_shading_normals(deformed_position, view_dir, gbuffer, mesh)
+
+        # ==========================================================================================
+        # Albedo ; roughness; specular intensity
+        # ==========================================================================================
+        all_tex = self.material_mlp(pe_input.view(-1, self.inp_size).to(torch.float32))
+        kd = all_tex[..., :3].view(bz, h, w, ch)
+        kr = all_tex[..., 3:4]
+        kr = kr.view(bz, h, w, 1).to(self.device)
+        ko = all_tex[..., 4:5]
+        ko = ko.view(bz, h, w, 1)
+
+        # inject new albedo and roughnes
+        if new_albedo is not None:
+            kd = new_albedo.to(self.device)
+
+        if new_roughness is not None:
+            kr = new_roughness.to(self.device)
+
+        if skin_mask is not None:
+            fresnel_constant = torch.ones((bz, h, w, 1)).to(self.device) * 0.047
+            fresnel_constant[skin_mask] = 0.028
+        else:
+            fresnel_constant = 0.04
+
+        # ========= diffuse shading ===========
+        kr_max = torch.ones((bz, h, w, 1))
+        kr_max = kr_max.to(self.device)
+        enc_nd_kr_max = self.dir_enc_func(normal_bend.view(-1, 3), kr_max.view(-1, 1))
+        shading = self.light_mlp(enc_nd_kr_max)
+        shading = shading.view(bz, h, w, 3)
+
+        # ========= specular shading shading ===========
+        color, buffers = light.shade_pbr_ipe(
+            deformed_position,
+            shading,
+            self.dir_enc_func,
+            self.light_mlp,
+            normal_bend,
+            kd,
+            kr,
+            view_dir,
+            ko,
+            normal_bend,
+            fresnel_constant,
+        )
+
+        return color, kd, buffers
+
+    patched_shader.forward = types.MethodType(_forward, patched_shader)
+
+    return run_inference(
+        views,
+        mesh,
+        FLAMEServer,
+        deformer_net,
+        patched_shader,
+        renderer,
+        channels_gbuffer,
+        lgt,
+        ghostbone,
+        finetune_color,
+    )
+
+
+def to_masked_rgba(rgb_pred, mask1c):
+    bz, H, W, _ = rgb_pred.shape
+    return torch.lerp(
+        torch.zeros((bz, H, W, 4)),
+        torch.concat([rgb_pred.cpu(), torch.ones_like(rgb_pred[..., 0:1]).cpu()], axis=3),
+        mask1c.float(),
+    )
