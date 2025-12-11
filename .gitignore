@@ -215,3 +215,4 @@ notebooks/checkpoints/**
 # util files
 diffusionrenderer_001_mvi_1812_subset.csv
 
+experiments/
