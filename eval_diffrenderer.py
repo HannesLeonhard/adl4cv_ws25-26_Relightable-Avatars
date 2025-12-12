@@ -13,54 +13,50 @@ from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 import lpips
 import sys
 from pathlib import Path
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
 import pandas as pd
 import json
 
 from material_aware_flare.eval import calculate_metrics
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
-module_path = os.path.join(current_dir, 'external', 'diffusion-renderer')
+module_path = os.path.join(current_dir, "external", "diffusion-renderer")
 if module_path not in sys.path:
     sys.path.append(module_path)
 from src.pipelines.pipeline_rgbx import RGBXVideoDiffusionPipeline
 from utils.utils_rgbx import convert_rgba_to_rgb_pil
 from utils.utils_rgbx_inference import (
-    touch, 
-    find_images_recursive, 
+    touch,
+    find_images_recursive,
     base_plus_ext,
-    group_images_into_videos, 
-    split_list_with_overlap, 
-    resize_upscale_without_padding
+    group_images_into_videos,
+    split_list_with_overlap,
+    resize_upscale_without_padding,
 )
 
 
 def main():
-    eval_transform_lpips = T.Compose([
-        T.ToTensor(),
-        T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-    ])
+    eval_transform_lpips = T.Compose(
+        [T.ToTensor(), T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])]
+    )
 
     cfg = SimpleNamespace(
         inference_model_weights="/home/hleonhard/adl4cv_ws25-26_Relightable-Avatars/notebooks/checkpoints/diffusion_renderer-inverse-svd",
         inference_input_dir="/home/hleonhard/data/flare_subject_data/001/MVI_1812/image/",
         inference_save_dir="/home/hleonhard/data//output_diffusionrenderer_001/MVI_1812/",
-
         # Inference Parameters
         inference_n_frames=2,
         overlap_n_frames=1,
         inference_n_steps=20,
-        chunk_mode='all',  # 'first' or 'all'
-        model_passes=[ 'roughness', 'normal', 'diffuse_albedo'],
+        chunk_mode="all",  # 'first' or 'all'
+        model_passes=["roughness", "normal", "diffuse_albedo"],
         inference_res=[512, 512],
-
-        # Model Config 
-        weight_dtype='fp16',
+        # Model Config
+        weight_dtype="fp16",
         cond_mode="skip",
         use_deterministic_mode=False,
         seed=42,
         autocast=True,
-
         # SVD-specific parameters
         inference_min_guidance_scale=1.0,
         inference_max_guidance_scale=3.0,
@@ -68,39 +64,44 @@ def main():
         motion_bucket_id=127,
         cond_aug=0,
         decode_chunk_size=None,
-
         # Data Loading
-        image_group_mode="folder", # 'folder' or 'individual'
+        image_group_mode="folder",  # 'folder' or 'individual'
         subsample_every_n_frames=1,
-        image_extensions=['.png', '.jpg', '.jpeg'],
-
+        image_extensions=[".png", ".jpg", ".jpeg"],
         # Saving
         save_image=False,
         save_video=False,
         save_video_fps=7,
-
         # Evaluation
         do_evaluation=True,
         flare_albedo_dir="/home/hleonhard/data/flare_models/001/MVI_1812/images_evaluation/albedo/",
         flare_normal_dir="/home/hleonhard/data/flare_models/001/MVI_1812/images_evaluation/normal/",
         flare_roughness_dir="/home/hleonhard/data/flare_models/001/MVI_1812/images_evaluation/roughness/",
-        flare_mask_dir='/home/hleonhard/data/flare_subject_data/001/MVI_1812/mask/',
+        flare_mask_dir="/home/hleonhard/data/flare_subject_data/001/MVI_1812/mask/",
     )
 
     # Post-process config (from original code)
     cfg.inference_height, cfg.inference_width = cfg.inference_res
-    if cfg.weight_dtype == 'fp16':
+    if cfg.weight_dtype == "fp16":
         cfg.torch_dtype = torch.float16
-    elif cfg.weight_dtype == 'fp32':
+    elif cfg.weight_dtype == "fp32":
         cfg.torch_dtype = torch.float32
 
     assert cfg.flare_albedo_dir is not None, "flare_albedo_dir must be provided for evaluation"
     assert cfg.flare_normal_dir is not None, "flare_normal_dir must be provided for evaluation"
-    assert cfg.flare_roughness_dir is not None, "flare_roughness_dir must be provided for evaluation"
+    assert cfg.flare_roughness_dir is not None, (
+        "flare_roughness_dir must be provided for evaluation"
+    )
     assert cfg.flare_mask_dir is not None
-    assert os.path.isdir(cfg.flare_albedo_dir), f"Flare albedo dir not found: {cfg.flare_albedo_dir}"
-    assert os.path.isdir(cfg.flare_normal_dir), f"Flare normal dir not found: {cfg.flare_normal_dir}"
-    assert os.path.isdir(cfg.flare_roughness_dir), f"Flare roughness dir not found: {cfg.flare_roughness_dir}"
+    assert os.path.isdir(cfg.flare_albedo_dir), (
+        f"Flare albedo dir not found: {cfg.flare_albedo_dir}"
+    )
+    assert os.path.isdir(cfg.flare_normal_dir), (
+        f"Flare normal dir not found: {cfg.flare_normal_dir}"
+    )
+    assert os.path.isdir(cfg.flare_roughness_dir), (
+        f"Flare roughness dir not found: {cfg.flare_roughness_dir}"
+    )
     assert os.path.isdir(cfg.flare_mask_dir)
     print("Evaluation enabled. Comparing against:")
     print(f"  Albedo: {cfg.flare_albedo_dir}")
@@ -126,22 +127,26 @@ def main():
     if "image_encoder" not in model_weights_subfolders:
         print("Downloading missing image_encoder from StabilityAI...")
         missing_kwargs["image_encoder"] = CLIPVisionModelWithProjection.from_pretrained(
-            "stabilityai/stable-video-diffusion-img2vid", subfolder="image_encoder",
+            "stabilityai/stable-video-diffusion-img2vid",
+            subfolder="image_encoder",
         )
         assert cfg.cond_mode != "image", "Image encoder missing but cond_mode is 'image'"
     if "feature_extractor" not in model_weights_subfolders:
         print("Downloading missing feature_extractor from StabilityAI...")
         missing_kwargs["feature_extractor"] = CLIPImageProcessor.from_pretrained(
-            "stabilityai/stable-video-diffusion-img2vid", subfolder="feature_extractor",
+            "stabilityai/stable-video-diffusion-img2vid",
+            subfolder="feature_extractor",
         )
         assert cfg.cond_mode != "image", "Feature extractor missing but cond_mode is 'image'"
 
-    pipeline = RGBXVideoDiffusionPipeline.from_pretrained(cfg.inference_model_weights, **missing_kwargs)
+    pipeline = RGBXVideoDiffusionPipeline.from_pretrained(
+        cfg.inference_model_weights, **missing_kwargs
+    )
     pipeline = pipeline.to(device)
     pipeline = pipeline.to(cfg.torch_dtype)
     pipeline.set_progress_bar_config(disable=True)
 
-    lpips_model = lpips.LPIPS(net='vgg').to(device).to(cfg.torch_dtype)
+    lpips_model = lpips.LPIPS(net="vgg").to(device).to(cfg.torch_dtype)
 
     # Diffusion Renderer requires the images to be grouped into sequences
     validation_image_paths = find_images_recursive(
@@ -192,9 +197,9 @@ def main():
     processing_list = validation_video_list
     marker = pd.read_csv("./notebooks/diffusionrenderer_001_mvi_1812_subset.csv", index_col=0)
 
-    all_metrics_data = {'diffuse_albedo': [], 'normal': [], 'roughness': []}
+    all_metrics_data = {"diffuse_albedo": [], "normal": [], "roughness": []}
 
-    if 'lpips_model' in locals() or 'lpips_model' in globals():
+    if "lpips_model" in locals() or "lpips_model" in globals():
         lpips_model = lpips_model.to(device, dtype=torch.float32)
         lpips_model.eval()
 
@@ -205,11 +210,11 @@ def main():
         video_relative_base_name = base_plus_ext(
             input_image_relative_path_list[0], mode=cfg.image_group_mode
         )[0]
-        video_relative_base_name = '/home/hleonhard/data/diff_renderer_001_MVI_1812'
+        video_relative_base_name = "/home/hleonhard/data/diff_renderer_001_MVI_1812"
         os.makedirs(
-                video_relative_base_name,
-                exist_ok=True,
-            )
+            video_relative_base_name,
+            exist_ok=True,
+        )
         print(f"Images will be saved to {video_relative_base_name}")
 
         # Split into chunks
@@ -227,16 +232,13 @@ def main():
                 os.path.join(cfg.inference_save_dir, f"{video_relative_base_name}"),
                 exist_ok=True,
             )
-        
 
         for chunk_ind in tqdm(
             range(0, len(input_image_relative_path_chunks), 2),
             desc="  Processing Chunks",
             leave=False,
         ):
-            success_signal_str = (
-                video_relative_base_name.replace("/", "--") + f".{chunk_ind:04d}"
-            )
+            success_signal_str = video_relative_base_name.replace("/", "--") + f".{chunk_ind:04d}"
             success_signal_path = os.path.join(success_signal_dir, success_signal_str)
             if os.path.exists(success_signal_path):
                 print(f"Skipping chunk: {success_signal_str}")
@@ -244,15 +246,13 @@ def main():
 
             current_image_relative_path_list = input_image_relative_path_chunks[chunk_ind]
             # check if we skip this index
-            if current_image_relative_path_list[0] in marker.iloc[:,0].values:
-                # already saw this 
+            if current_image_relative_path_list[0] in marker.iloc[:, 0].values:
+                # already saw this
                 print(f"Skipping chunk: {current_image_relative_path_list[0]}")
                 continue
             # Fill frames to inference_n_frames
             while len(current_image_relative_path_list) < cfg.inference_n_frames:
-                current_image_relative_path_list.append(
-                    current_image_relative_path_list[-1]
-                )
+                current_image_relative_path_list.append(current_image_relative_path_list[-1])
 
             # Process input image
             input_images_uint8 = []
@@ -273,10 +273,7 @@ def main():
                         )
                         width, height = input_image_pil.size
                 else:
-                    if (
-                        width != input_image_pil.size[0]
-                        or height != input_image_pil.size[1]
-                    ):
+                    if width != input_image_pil.size[0] or height != input_image_pil.size[1]:
                         input_image_pil = input_image_pil.resize(
                             (width, height), resample=Image.BILINEAR
                         )
@@ -352,7 +349,7 @@ def main():
                     if cfg.do_evaluation and inference_pass in [
                         "diffuse_albedo",
                         "normal",
-                        "roughness"
+                        "roughness",
                     ]:
                         gt_image_pil = inference_image_list[ind]
                         input_image_filename = os.path.basename(
@@ -371,9 +368,7 @@ def main():
                             gt_path = os.path.join(
                                 cfg.flare_roughness_dir, input_image_filename.zfill(8)
                             )
-                        mask_path = os.path.join(
-                                cfg.flare_mask_dir, input_image_filename
-                            )
+                        mask_path = os.path.join(cfg.flare_mask_dir, input_image_filename)
                         if gt_path and os.path.exists(gt_path):
                             gen_image_pil = Image.open(gt_path)
                             mask = plt.imread(mask_path)
@@ -412,35 +407,38 @@ def main():
                     cfg.inference_save_dir,
                     f"{video_relative_base_name}.{chunk_ind:04d}.viz.mp4",
                 )
-                imageio.mimsave(
-                    save_path, viz_images_uint8, fps=cfg.save_video_fps, codec="h264"
-                )
+                imageio.mimsave(save_path, viz_images_uint8, fps=cfg.save_video_fps, codec="h264")
     with open("diff_renderer_res.json", "w") as file:
         json.dump(all_metrics_data, file)
-    passes = ['diffuse_albedo', 'normal', 'roughness']
-    print("\n" + "="*30)
+    passes = ["diffuse_albedo", "normal", "roughness"]
+    print("\n" + "=" * 30)
     print(" FINAL EVALUATION METRICS ON 001")
-    print("="*30)
+    print("=" * 30)
     # In a single-node script, no 'gather' is needed.
-    all_metrics_list = all_metrics_data['diffuse_albedo'] + all_metrics_data['normal']  + all_metrics_data['roughness']
-    
+    all_metrics_list = (
+        all_metrics_data["diffuse_albedo"]
+        + all_metrics_data["normal"]
+        + all_metrics_data["roughness"]
+    )
+
     if len(all_metrics_list) == 0:
         print("No metrics gathered.")
     else:
         df = pd.DataFrame(all_metrics_list)
         # Calculate and print averages
         for pass_name in passes:
-            pass_df = df[df['pass'] == pass_name]
+            pass_df = df[df["pass"] == pass_name]
             if pass_df.empty:
                 print(f"\nNo metrics calculated for {pass_name}.")
                 continue
-            avg_psnr = pass_df['psnr'].mean()
-            avg_ssim = pass_df['ssim'].mean()
-            avg_lpips = pass_df['lpips'].mean()
+            avg_psnr = pass_df["psnr"].mean()
+            avg_ssim = pass_df["ssim"].mean()
+            avg_lpips = pass_df["lpips"].mean()
             print(f"\n--- Average Metrics for: {pass_name} ---")
             print(f"  PSNR:  {avg_psnr:.4f}")
             print(f"  SSIM:  {avg_ssim:.4f}")
             print(f"  LPIPS: {avg_lpips:.4f}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
