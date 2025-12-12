@@ -254,13 +254,13 @@ def _material_aware_training(
                 print("Faces:", f_upsampled.shape)
                 del v_upsampled, f_upsampled
                 if iteration == training_config.upsample_iterations[0]:
-                    lr_vertices *= 0.75
+                    training_config.lr_vertices *= 0.75
                     # Adjust weights and step size
                     loss_weights["laplacian"] *= 4
                     loss_weights["normal"] *= 4
                 print("laplacian weight", loss_weights["laplacian"])
                 print("normal consistency weight", loss_weights["normal"])
-                print("lr vertices", lr_vertices)
+                print("lr vertices", training_config.lr_vertices)
 
                 displacements.register_parameter(
                     "vertex_offsets",
@@ -272,7 +272,7 @@ def _material_aware_training(
                 displacements.vertices_shape = flame_canonical_mesh.vertices.shape
                 displacements.to(device=device)
                 optimizer_vertices = torch.optim.Adam(
-                    list(displacements.parameters()), lr=lr_vertices
+                    list(displacements.parameters()), lr=training_config.lr_vertices
                 )
 
             v_off = displacements()
