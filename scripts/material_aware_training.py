@@ -65,26 +65,26 @@ def build_flare_training_pipeline(
         flame_canonical_mesh = read_mesh(mesh_path, device=device)
         flame_canonical_mesh.compute_connectivity()
         flame_canonical_mesh.to(device)
-        return flame_canonical_mesh
 
-    if training_config.downsample:
-        v_down, f_down = remesh_botsch(
-            FLAMEServer.canonical_verts.squeeze(0).cpu().detach().numpy().astype(np.float64),
-            FLAMEServer.faces_tensor.cpu().numpy().astype(np.int32),
-            h=float(training_config.downsample_ratio),
-        )
-        verts = np.ascontiguousarray(v_down)
-        faces = np.ascontiguousarray(f_down)
-        print("Downsampled:", verts.shape, faces.shape)
     else:
-        verts = FLAMEServer.canonical_verts.squeeze(0)
-        faces = FLAMEServer.faces_tensor
+        if training_config.downsample:
+            v_down, f_down = remesh_botsch(
+                FLAMEServer.canonical_verts.squeeze(0).cpu().detach().numpy().astype(np.float64),
+                FLAMEServer.faces_tensor.cpu().numpy().astype(np.int32),
+                h=float(training_config.downsample_ratio),
+            )
+            verts = np.ascontiguousarray(v_down)
+            faces = np.ascontiguousarray(f_down)
+            print("Downsampled:", verts.shape, faces.shape)
+        else:
+            verts = FLAMEServer.canonical_verts.squeeze(0)
+            faces = FLAMEServer.faces_tensor
 
-    flame_canonical_mesh = Mesh(verts, faces, device=device)
-    flame_canonical_mesh.compute_connectivity()
-    write_mesh(
-        path_config.meshes_save_path(stage) / "init_mesh.obj", flame_canonical_mesh.to("cpu")
-    )
+        flame_canonical_mesh = Mesh(verts, faces, device=device)
+        flame_canonical_mesh.compute_connectivity()
+        write_mesh(
+            path_config.meshes_save_path(stage) / "init_mesh.obj", flame_canonical_mesh.to("cpu")
+        )
 
     # renderer
     aabb = AABB(flame_canonical_mesh.vertices.cpu().numpy())
