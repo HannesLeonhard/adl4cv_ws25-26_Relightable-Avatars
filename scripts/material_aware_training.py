@@ -20,6 +20,12 @@ from robust_loss_pytorch.adaptive import AdaptiveLossFunction
 import time
 from tqdm import tqdm
 from scripts.config import PathConfig, MaterialAwareTrainingConfig
+from scripts.material_diffusion_regularization import (
+    diffusion_albedo_regularization,
+    diffusion_irradiance_regularization,
+    diffusion_normal_regularization,
+    diffusion_roughness_regularization,
+)
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -82,7 +88,8 @@ def build_flare_training_pipeline(
         flame_canonical_mesh = Mesh(verts, faces, device=device)
         flame_canonical_mesh.compute_connectivity()
         write_mesh(
-            path_config.meshes_save_path(training_config.stage) / "init_mesh.obj", flame_canonical_mesh.to("cpu")
+            path_config.meshes_save_path(training_config.stage) / "init_mesh.obj",
+            flame_canonical_mesh.to("cpu"),
         )
 
     # renderer
@@ -180,9 +187,7 @@ def _material_aware_training(
     lr_vertices = training_config.lr_vertices
 
     # optimizer
-    optimizer_vertices = torch.optim.Adam(
-        list(displacements.parameters()), lr=lr_vertices
-    )
+    optimizer_vertices = torch.optim.Adam(list(displacements.parameters()), lr=lr_vertices)
     if training_config.train_deformer:
         optimizer_deformer = torch.optim.Adam(
             list(deformer_net.parameters()), lr=training_config.lr_deformer
@@ -206,6 +211,10 @@ def _material_aware_training(
         "white_light_regularization": training_config.weight_white_lgt_regularization,
         "fresnel_coeff": training_config.weight_fresnel_coeff,
         "flame_regularization": 1.0 if training_config.train_deformer else 0.0,
+        "diffusion_normal": training_config.weight_diffusion_normal_regularization,
+        "diffusion_albedo": training_config.weight_diffusion_albedo_regularization,
+        "diffusion_roughness": training_config.weight_diffusion_roughness_regularization,
+        "diffusion_irradiance": training_config.weight_diffusion_irradiance_regularization,
     }
 
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
@@ -368,7 +377,32 @@ def _material_aware_training(
 
                 if iteration in training_config.decay_flame:
                     print("Decaying flame regularization")
-                    loss_weights["flame_regularization"] *= 0.5
+                    loss_weights["flame_regularization"] *= 0.5            
+
+            losses["diffusion_normal"] = diffusion_normal_regularization(
+                gbuffers["normal"],
+                views_subset["diffusion_normal"],
+                views_subset["skin_mask"],
+                views_subset["mask"],
+            )
+            losses["diffusion_albedo"] = diffusion_albedo_regularization(
+                cbuffers["albedo"],
+                views_subset["diffusion_albedo"],
+                views_subset["skin_mask"],
+                views_subset["mask"],
+            )
+            losses["diffusion_roughness"] = diffusion_roughness_regularization(
+                cbuffers["roughness"],
+                views_subset["diffusion_roughness"],
+                views_subset["skin_mask"],
+                views_subset["mask"],
+            )
+            losses["diffusion_irradiance"] = diffusion_irradiance_regularization(
+                cbuffers["irradiance"],
+                views_subset["diffusion_irradiance"],
+                views_subset["skin_mask"],
+                views_subset["mask"],
+            )
 
             loss = torch.tensor(0.0, device=device)
             for k, v in losses.items():
@@ -393,10 +427,17 @@ def _material_aware_training(
             progress_bar.set_postfix({"loss": loss.detach().cpu().item()})
 
             if iteration == 100:
-                convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
+                convert_uint = lambda x: torch.from_numpy(
+                    np.clip(np.rint(rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(
+                        np.uint8
+                    )
+                ).to(device)
                 diffuse_shading = convert_uint(cbuffers["shading"])
                 specular_shading = convert_uint(cbuffers["specu"])
-                if torch.count_nonzero(diffuse_shading) == 0 or torch.count_nonzero(specular_shading) == 0:
+                if (
+                    torch.count_nonzero(diffuse_shading) == 0
+                    or torch.count_nonzero(specular_shading) == 0
+                ):
                     print("All values predicted from light MLP are zero")
                     return False
 
@@ -404,9 +445,14 @@ def _material_aware_training(
     total_time = (end - start) % 3600
     print("TIME TAKEN (mins):", int(total_time // 60))
 
-    write_mesh(path_config.meshes_save_path(training_config.stage) / f"mesh_latest.obj", mesh.detach().to("cpu"))
+    write_mesh(
+        path_config.meshes_save_path(training_config.stage) / f"mesh_latest.obj",
+        mesh.detach().to("cpu"),
+    )
     shader.save(path_config.shaders_save_path(training_config.stage) / f"shader_latest.pt")
-    displacements.save(path_config.shaders_save_path(training_config.stage) / f"displacement_latest.pt")
+    displacements.save(
+        path_config.shaders_save_path(training_config.stage) / f"displacement_latest.pt"
+    )
     deformer_net.save(path_config.shaders_save_path(training_config.stage) / f"deformer_latest.pt")
 
 
