@@ -8,6 +8,7 @@ class PathConfig:
     run_name: str
     input_dir: str
     train_dir: list[str]
+    eval_dir: list[str]
     output_dir: str
     flame_path: str
     diffusion_dir: str
@@ -38,6 +39,7 @@ class PathConfig:
 
 @dataclass
 class MaterialAwareTrainingConfig:
+    stage: str
     finetune_color: bool
     train_deformer: bool
 
@@ -63,8 +65,8 @@ class MaterialAwareTrainingConfig:
     weight_perceptual_loss: float = 0.1
     weight_flame_regularization: float = 10.0
     weight_albedo_regularization: float = 0.01
-    weight_roughness_regularization: float = 0.1
-    weight_white_lgt_regularization: float = 1.0
+    weight_roughness_regularization: float = 0.01
+    weight_white_lgt_regularization: float = 0.01
     weight_fresnel_coeff: float = 0.01
     weight_diffusion_albedo_regularization: float = 0.0
     weight_diffusion_normal_regularization: float = 0.0
@@ -86,6 +88,7 @@ class MaterialAwareTrainingConfig:
     @classmethod
     def default_stage_1_config(cls, batch_size: int, ghostbone: bool):
         return cls(
+            stage="stage_1",
             finetune_color=False,
             train_deformer=True,
             batch_size=batch_size,
@@ -96,6 +99,7 @@ class MaterialAwareTrainingConfig:
     @classmethod
     def default_stage_2_config(cls, batch_size: int, ghostbone: bool):
         return cls(
+            stage="stage_2",
             finetune_color=True,
             train_deformer=False,
             batch_size=batch_size,

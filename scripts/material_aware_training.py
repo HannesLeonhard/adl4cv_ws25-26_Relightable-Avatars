@@ -10,6 +10,7 @@ from flare.utils import (
 import nvdiffrec.render.light as light
 from flare.dataset import DatasetLoader
 from flare.dataset import *
+from flare.dataset.dataset_util import rgb_to_srgb
 import nvdiffrec.render.light as light
 import torch
 from pathlib import Path
@@ -56,16 +57,14 @@ def build_flare_training_pipeline(
     training_config: MaterialAwareTrainingConfig,
     dataset_train: DatasetLoader,
     FLAMEServer: FLAME,
-    stage: str,
 ):
     # mesh
     if training_config.finetune_color:
-        mesh_path = path_config.experiment_dir / "stage_1" / "meshes" / "mesh_latest.obj"
+        mesh_path = path_config.experiment_dir / "stage_1/meshes/mesh_latest.obj"
         print("loading mesh from:", mesh_path)
         flame_canonical_mesh = read_mesh(mesh_path, device=device)
         flame_canonical_mesh.compute_connectivity()
         flame_canonical_mesh.to(device)
-
     else:
         if training_config.downsample:
             v_down, f_down = remesh_botsch(
@@ -83,7 +82,7 @@ def build_flare_training_pipeline(
         flame_canonical_mesh = Mesh(verts, faces, device=device)
         flame_canonical_mesh.compute_connectivity()
         write_mesh(
-            path_config.meshes_save_path(stage) / "init_mesh.obj", flame_canonical_mesh.to("cpu")
+            path_config.meshes_save_path(training_config.stage) / "init_mesh.obj", flame_canonical_mesh.to("cpu")
         )
 
     # renderer
@@ -98,7 +97,7 @@ def build_flare_training_pipeline(
     channels_gbuffer = ["mask", "position", "normal", "canonical_position"]
     print("Rasterizing:", channels_gbuffer)
 
-    # displacements
+    # vertices
     displacements = Displacement(vertices_shape=flame_canonical_mesh.vertices.shape)
     displacements.to(device=device)
 
@@ -164,7 +163,6 @@ def _material_aware_training(
     dataset_train: DatasetLoader,
     dataloader_train: torch.utils.data.DataLoader,
     FLAMEServer: FLAME,
-    stage: str,
 ):
     flame_canonical_mesh, renderer, channels_gbuffer, displacements, deformer_net, shader, lgt = (
         build_flare_training_pipeline(
@@ -172,16 +170,18 @@ def _material_aware_training(
             training_config,
             dataset_train,
             FLAMEServer,
-            stage,
         )
     )
 
-    if training_config.train_deformer:
+    weight_flame_regularization = training_config.weight_flame_regularization
+    if not training_config.train_deformer:
         weight_flame_regularization = 0.0
+
+    lr_vertices = training_config.lr_vertices
 
     # optimizer
     optimizer_vertices = torch.optim.Adam(
-        list(displacements.parameters()), lr=training_config.lr_vertices
+        list(displacements.parameters()), lr=lr_vertices
     )
     if training_config.train_deformer:
         optimizer_deformer = torch.optim.Adam(
@@ -254,13 +254,13 @@ def _material_aware_training(
                 print("Faces:", f_upsampled.shape)
                 del v_upsampled, f_upsampled
                 if iteration == training_config.upsample_iterations[0]:
-                    training_config.lr_vertices *= 0.75
+                    lr_vertices *= 0.75
                     # Adjust weights and step size
                     loss_weights["laplacian"] *= 4
                     loss_weights["normal"] *= 4
                 print("laplacian weight", loss_weights["laplacian"])
                 print("normal consistency weight", loss_weights["normal"])
-                print("lr vertices", training_config.lr_vertices)
+                print("lr vertices", lr_vertices)
 
                 displacements.register_parameter(
                     "vertex_offsets",
@@ -272,7 +272,7 @@ def _material_aware_training(
                 displacements.vertices_shape = flame_canonical_mesh.vertices.shape
                 displacements.to(device=device)
                 optimizer_vertices = torch.optim.Adam(
-                    list(displacements.parameters()), lr=training_config.lr_vertices
+                    list(displacements.parameters()), lr=lr_vertices
                 )
 
             v_off = displacements()
@@ -392,14 +392,22 @@ def _material_aware_training(
 
             progress_bar.set_postfix({"loss": loss.detach().cpu().item()})
 
+            if iteration == 100:
+                convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
+                diffuse_shading = convert_uint(cbuffers["shading"])
+                specular_shading = convert_uint(cbuffers["specu"])
+                if torch.count_nonzero(diffuse_shading) == 0 or torch.count_nonzero(specular_shading) == 0:
+                    print("All values predicted from light MLP are zero")
+                    return False
+
     end = time.time()
     total_time = (end - start) % 3600
     print("TIME TAKEN (mins):", int(total_time // 60))
 
-    write_mesh(path_config.meshes_save_path(stage) / f"mesh_latest.obj", mesh.detach().to("cpu"))
-    shader.save(path_config.shaders_save_path(stage) / f"shader_latest.pt")
-    displacements.save(path_config.shaders_save_path(stage) / f"displacement_latest.pt")
-    deformer_net.save(path_config.shaders_save_path(stage) / f"deformer_latest.pt")
+    write_mesh(path_config.meshes_save_path(training_config.stage) / f"mesh_latest.obj", mesh.detach().to("cpu"))
+    shader.save(path_config.shaders_save_path(training_config.stage) / f"shader_latest.pt")
+    displacements.save(path_config.shaders_save_path(training_config.stage) / f"displacement_latest.pt")
+    deformer_net.save(path_config.shaders_save_path(training_config.stage) / f"deformer_latest.pt")
 
 
 def material_aware_training(
@@ -442,7 +450,6 @@ def material_aware_training(
         dataset_train,
         dataloader_train,
         FLAMEServer,
-        stage="stage_1",
     )
 
     # stage 2
@@ -456,13 +463,12 @@ def material_aware_training(
         dataset_train,
         dataloader_train,
         FLAMEServer,
-        stage="stage_2",
     )
 
 
 if __name__ == "__main__":
     material_aware_training(
-        run_name="002",
+        run_name="003",
         working_dir="/home/jsickert/adl4cv/",
         input_dir="DATA/001",
         train_dir=["MVI_1814", "MVI_1810"],
