@@ -5,10 +5,11 @@ from flare.modules import NeuralShader, get_deformer_network, Displacement, Forw
 from flare.utils import (
     AABB,
     read_mesh,
+    visualize_training,
     write_mesh,
 )
 import nvdiffrec.render.light as light
-from flare.dataset import DatasetLoader
+from flare.dataset import DatasetLoader, dataset_util
 from flare.dataset import *
 import nvdiffrec.render.light as light
 import torch
@@ -18,7 +19,14 @@ from gpytoolbox import remesh_botsch
 from robust_loss_pytorch.adaptive import AdaptiveLossFunction
 import time
 from tqdm import tqdm
-from scripts.config import PathConfig, MaterialAwareTrainingConfig
+from scripts.config import PathConfig, MaterialAwareTrainingConfig, write_config_to_json
+from typing import Any
+from material_aware_flare.material_diffusion_regularization import (
+    diffusion_albedo_regularization, 
+    diffusion_irradiance_regularization, 
+    diffusion_normal_regularization, 
+    diffusion_roughness_regularization
+)
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -157,6 +165,29 @@ def build_flare_training_pipeline(
         lgt,
     )
 
+def run(args, mesh, views, FLAMEServer, deformer_net, shader, renderer, device, channels_gbuffer, lgt):
+    ## ============== deform ==============================     
+    shapedirs, posedirs, lbs_weights = deformer_net.query_weights(mesh.vertices)
+    eval_vertices = mesh.vertices
+    batched_verts = eval_vertices.unsqueeze(0).repeat(views["img"].shape[0], 1, 1)
+
+    _, pose_features, transformations = FLAMEServer(expression_params=views["flame_expression"], full_pose=views["flame_pose"])
+    if args.ghostbone:
+        transformations = torch.cat([torch.eye(4).unsqueeze(0).unsqueeze(0).expand(views["img"].shape[0], -1, -1, -1).float().to(device), transformations], 1)
+    deformed_vertices = FLAMEServer.forward_pts_batch(pnts_c=batched_verts, betas=views["flame_expression"], transformations=transformations, pose_feature=pose_features, 
+                                        shapedirs=shapedirs, posedirs=posedirs, lbs_weights=lbs_weights, dtype=torch.float32, map2_flame_original=True)
+
+    d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
+    ## ============== Rasterize ==============================
+    gbuffers = renderer.render_batch(views["camera"], deformed_vertices.contiguous(), d_normals,
+                        channels=channels_gbuffer, with_antialiasing=True, 
+                        canonical_v=mesh.vertices, canonical_idx=mesh.indices)
+    
+    ## ============== predict color ==============================
+    rgb_pred, cbuffers, gbuffer_mask = shader.shade(gbuffers, views, mesh, args.finetune_color, lgt)
+
+    return rgb_pred, gbuffers, cbuffers
+
 
 def _material_aware_training(
     path_config: PathConfig,
@@ -165,6 +196,7 @@ def _material_aware_training(
     dataloader_train: torch.utils.data.DataLoader,
     FLAMEServer: FLAME,
     stage: str,
+    debug_views: Any
 ):
     flame_canonical_mesh, renderer, channels_gbuffer, displacements, deformer_net, shader, lgt = (
         build_flare_training_pipeline(
@@ -177,6 +209,8 @@ def _material_aware_training(
     )
 
     if training_config.train_deformer:
+        weight_flame_regularization = 1.0
+    else:
         weight_flame_regularization = 0.0
 
     # optimizer
@@ -206,6 +240,10 @@ def _material_aware_training(
         "white_light_regularization": training_config.weight_white_lgt_regularization,
         "fresnel_coeff": training_config.weight_fresnel_coeff,
         "flame_regularization": 1.0 if training_config.train_deformer else 0.0,
+        "diffusion_normal": training_config.weight_diffusion_normal_regularization,
+        "diffusion_albedo": training_config.weight_diffusion_albedo_regularization,
+        "diffusion_roughness": training_config.weight_diffusion_roughness_regularization,
+        "diffusion_irradiance": training_config.weight_diffusion_irradiance_regularization,
     }
 
     losses = {k: torch.tensor(0.0, device=device) for k in loss_weights}
@@ -311,7 +349,9 @@ def _material_aware_training(
                 map2_flame_original=True,
             )
             d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
-
+            # ==============================================================================================
+            # R A S T E R I Z A T I O N
+            # ==============================================================================================
             gbuffers = renderer.render_batch(
                 views_subset["camera"],
                 deformed_vertices.contiguous(),
@@ -321,22 +361,24 @@ def _material_aware_training(
                 canonical_v=mesh.vertices,
                 canonical_idx=mesh.indices,
             )
-
+            # ==============================================================================================
+            # loss function 
+            # ==============================================================================================
+            ## ============== geometry regularization ==============================
             losses["normal"] = normal_consistency_loss(mesh)
             losses["laplacian"] = laplacian_loss(mesh)
-
+            ## ============== color + regularization for color ==============================
             pred_color_masked, cbuffers, gbuffer_mask = shader.shade(
                 gbuffers, views_subset, mesh, training_config.finetune_color, lgt
             )
-
             losses["shading"], pred_color, tonemapped_colors = shading_loss_batch(
                 pred_color_masked, views_subset, training_config.batch_size
             )
             losses["perceptual_loss"] = VGGloss(
                 tonemapped_colors[0], tonemapped_colors[1], iteration
             )
-
             losses["mask"] = mask_loss(views_subset["mask"], gbuffer_mask)
+             ## ======= regularization color ========
             losses["albedo_regularization"] = albedo_regularization(
                 _adaptive, shader, mesh, device, displacements, iteration
             )
@@ -350,7 +392,7 @@ def _material_aware_training(
             losses["fresnel_coeff"] = spec_intensity_regularization(
                 cbuffers["ko"], views_subset["skin_mask"], views_subset["mask"]
             )
-
+            ## ============== flame regularization ==============================
             if loss_weights["flame_regularization"] > 0:
                 losses["flame_regularization"], gt_nn = flame_regularization(
                     FLAMEServer,
@@ -369,11 +411,20 @@ def _material_aware_training(
                 if iteration in training_config.decay_flame:
                     print("Decaying flame regularization")
                     loss_weights["flame_regularization"] *= 0.5
-
+            ## ============== diffusion regularization ==============================
+            losses['diffusion_normal'] = diffusion_normal_regularization(gbuffers["normal"], views_subset["diffusion_normal"], views_subset["skin_mask"], views_subset["mask"])
+            losses['diffusion_albedo'] = diffusion_albedo_regularization(cbuffers["albedo"], views_subset["diffusion_albedo"], views_subset["skin_mask"], views_subset["mask"])
+            losses['diffusion_roughness'] = diffusion_roughness_regularization(cbuffers["roughness"], views_subset["diffusion_roughness"], views_subset["skin_mask"], views_subset["mask"])
+            losses['diffusion_irradiance'] = diffusion_irradiance_regularization(cbuffers["irradiance"], views_subset["diffusion_irradiance"], views_subset["skin_mask"], views_subset["mask"])
+            # ==============================================================================================
+            # Aggregate losses
+            # ==============================================================================================
             loss = torch.tensor(0.0, device=device)
             for k, v in losses.items():
                 loss += v * loss_weights[k]
-
+            # ==============================================================================================
+            # Optimizer step
+            # ==============================================================================================
             optimizer_shader.zero_grad()
             optimizer_vertices.zero_grad()
             if training_config.train_deformer:
@@ -381,16 +432,50 @@ def _material_aware_training(
 
             loss.backward()
             torch.cuda.synchronize()
-
+            ### increase the gradients of positional encoding following tinycudnn
             if training_config.grad_scale and training_config.fourier_features == "hashgrid":
                 shader.fourier_feature_transform.params.grad /= 8.0
-
             optimizer_shader.step()
             optimizer_vertices.step()
             if training_config.train_deformer:
                 optimizer_deformer.step()
-
             progress_bar.set_postfix({"loss": loss.detach().cpu().item()})
+            # ==============================================================================================
+            # warning: check if light mlp diverged
+            # ==============================================================================================
+            '''
+            We do not use an activation function for the output layer of light MLP because we are learning in sRGB space where the values 
+            are not restricted between 0 and 1. As a result, the light MLP diverges sometimes and predicts only zero values. 
+            Hence, we have included the try and catch block to automatically restart the training during this case. 
+            '''
+            if iteration == 100:
+                convert_uint = lambda x: torch.from_numpy(np.clip(np.rint(dataset_util.rgb_to_srgb(x).detach().cpu().numpy() * 255.0), 0, 255).astype(np.uint8)).to(device)
+                try:
+                    diffuse_shading = convert_uint(cbuffers["shading"])
+                    specular_shading = convert_uint(cbuffers["specu"])
+                    if torch.count_nonzero(diffuse_shading) == 0 or torch.count_nonzero(specular_shading) == 0:
+                        raise ValueError("All values predicted from light MLP are zero")
+                except ValueError as e:
+                    print(f"Error: {e}")
+                    raise  # Raise the exception to exit the current execution of main()
+                
+            # ==============================================================================================
+            # V I S U A L I Z A T I O N S
+            # ==============================================================================================
+            if (training_config.visualization_frequency > 0) and (iteration == 1 or iteration % training_config.visualization_frequency == 0):
+                with torch.no_grad():
+                    debug_rgb_pred, debug_gbuffer, debug_cbuffers = run(training_config, mesh, debug_views, FLAMEServer, deformer_net, shader, renderer, device, channels_gbuffer, lgt)
+                    ## ============== visualize ==============================
+                    visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, path_config.images_save_path(stage), iteration)
+                    del debug_gbuffer, debug_cbuffers
+            ## ============== save intermediate ==============================
+            if (training_config.save_frequency > 0) and (iteration == 1 or iteration % training_config.save_frequency == 0):
+                with torch.no_grad():
+                    write_mesh(path_config.meshes_save_path(stage) / f"mesh_{iteration:06d}.obj", mesh.detach().to('cpu'))                                
+                    shader.save(path_config.shaders_save_path(stage) / f'shader_{iteration:06d}.pt')
+                    displacements.save(path_config.shaders_save_path(stage) / f'displacement_{iteration:06d}.pt')
+                    deformer_net.save(path_config.shaders_save_path(stage) / f'deformer_{iteration:06d}.pt')
+
 
     end = time.time()
     total_time = (end - start) % 3600
@@ -408,6 +493,7 @@ def material_aware_training(
     output_dir: str,
     flame_path: str,
     train_dir: list[str],
+    eval_dir: list[str],
     input_dir: str,
     diffusion_dir: str,
     batch_size: int = 2,
@@ -416,11 +502,15 @@ def material_aware_training(
     path_config = PathConfig(
         working_dir, run_name, input_dir, train_dir, output_dir, flame_path, diffusion_dir
     )
+    # stage 1
+    default_stage_1_config = MaterialAwareTrainingConfig.default_stage_1_config(
+        batch_size=batch_size, ghostbone=ghostbone
+    )
 
     print("loading train views...")
 
     dataset_train = DatasetLoader(path_config, train_dir=train_dir, sample_ratio=1, pre_load=True)
-
+    dataset_val = DatasetLoader(path_config, train_dir=eval_dir, sample_ratio=24, pre_load=True)
     dataloader_train = torch.utils.data.DataLoader(
         dataset_train,
         batch_size=batch_size,
@@ -428,12 +518,18 @@ def material_aware_training(
         shuffle=True,
         drop_last=True,
     )
-
+    view_indices = np.array(default_stage_1_config.visualization_views).astype(int)
+    d_l = [dataset_val.__getitem__(idx) for idx in view_indices[2:]]
+    d_l.append(dataset_train.__getitem__(view_indices[0]))
+    d_l.append(dataset_train.__getitem__(view_indices[1]))
+    debug_views = dataset_val.collate(d_l)
+    del dataset_val
     FLAMEServer = build_flame_server(dataset_train, flame_path, ghostbone)
 
-    # stage 1
-    default_stage_1_config = MaterialAwareTrainingConfig.default_stage_1_config(
-        batch_size=batch_size, ghostbone=ghostbone
+    write_config_to_json(
+        path_config=path_config,
+        train_config=default_stage_1_config,
+        file_path=Path(f"{working_dir}/{output_dir}/{run_name}/config_stage1.json")
     )
 
     _material_aware_training(
@@ -443,11 +539,18 @@ def material_aware_training(
         dataloader_train,
         FLAMEServer,
         stage="stage_1",
+        debug_views=debug_views
     )
 
     # stage 2
     default_stage_2_config = MaterialAwareTrainingConfig.default_stage_2_config(
         batch_size=batch_size, ghostbone=ghostbone
+    )
+
+    write_config_to_json(
+        path_config=path_config,
+        train_config=default_stage_2_config,
+        file_path=Path(f"{working_dir}/{output_dir}/{run_name}/config_stage2.json")
     )
 
     _material_aware_training(
@@ -457,6 +560,7 @@ def material_aware_training(
         dataloader_train,
         FLAMEServer,
         stage="stage_2",
+        debug_views=debug_views
     )
 
 

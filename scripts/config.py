@@ -1,5 +1,7 @@
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict, is_dataclass
+import json
+from typing import Any
 
 
 @dataclass
@@ -34,7 +36,18 @@ class PathConfig:
         if not dir.exists():
             dir.mkdir(parents=True)
         return dir
-
+    
+    def images_save_path(self, stage: str) -> Path:
+        dir = self.experiment_dir / stage / "images"
+        if not dir.exists():
+            dir.mkdir(parents=True)
+        return dir
+    
+    def images_eval_path(self) -> Path:
+        dir = self.experiment_dir / "images_evaluation"
+        if not dir.exists():
+            dir.mkdir(parents=True)
+        return dir
 
 @dataclass
 class MaterialAwareTrainingConfig:
@@ -66,9 +79,9 @@ class MaterialAwareTrainingConfig:
     weight_roughness_regularization: float = 0.1
     weight_white_lgt_regularization: float = 1.0
     weight_fresnel_coeff: float = 0.01
-    weight_diffusion_albedo_regularization: float = 0.0
-    weight_diffusion_normal_regularization: float = 0.0
-    weight_diffusion_roughness_regularization: float = 0.0
+    weight_diffusion_albedo_regularization: float = 0.1
+    weight_diffusion_normal_regularization: float = 0.1
+    weight_diffusion_roughness_regularization: float = 0.1
     weight_diffusion_irradiance_regularization: float = 0.0
 
     bsdf: str = "pbr_shading"
@@ -77,11 +90,15 @@ class MaterialAwareTrainingConfig:
     light_mlp_ch: int = 3
     light_mlp_dims: list[int] = field(default_factory=lambda: [64, 64])
     material_mlp_ch: int = 5
-    material_mlp_dims: list[int] = field(default_factory=lambda: [128, 128, 128, 128])
+    material_mlp_dims: list[int] = field(default_factory=lambda: [128, 128, 128, 128, 128])
     r_mean: float = 0.5
 
     ghostbone: bool = True
     deform_dims: list[int] = field(default_factory=lambda: [128, 128, 128, 128])
+
+    visualization_frequency: int = 300
+    save_frequency: int = 0
+    visualization_views: list[int] = field(default_factory=lambda: [15, 25, 27, 21, 26])
 
     @classmethod
     def default_stage_1_config(cls, batch_size: int, ghostbone: bool):
@@ -106,3 +123,63 @@ class MaterialAwareTrainingConfig:
             lr_vertices=1e-5,
             ghostbone=ghostbone,
         )
+
+
+def serialize_dataclass_to_dict(obj: Any) -> Any:
+    """Recursively converts a dataclass object into a dictionary suitable for JSON."""
+    # dataclass -> use asdict to get field values (recursively handled below)
+    if is_dataclass(obj):
+        data = asdict(obj)
+        return {k: serialize_dataclass_to_dict(v) for k, v in data.items()}
+
+    # pathlib.Path (including PosixPath/WindowsPath)
+    if isinstance(obj, Path):
+        # return POSIX-style path (always uses forward slashes)
+        return obj.as_posix()
+
+    # dict -> serialize keys and values (keys must become strings for JSON)
+    if isinstance(obj, dict):
+        return {str(serialize_dataclass_to_dict(k)): serialize_dataclass_to_dict(v) for k, v in obj.items()}
+
+    # sequences -> list
+    if isinstance(obj, (list, tuple, set)):
+        return [serialize_dataclass_to_dict(item) for item in obj]
+
+    # primitive JSON-serializable types
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+
+    # fallback: try to return a JSON-friendly representation
+    # prefer to return the object itself if json can handle it; otherwise return str(obj)
+    try:
+        json.dumps(obj)
+        return obj
+    except (TypeError, OverflowError):
+        return str(obj)
+
+
+def write_config_to_json(
+    path_config: PathConfig,
+    train_config: MaterialAwareTrainingConfig,
+    file_path: Path
+):
+    """
+    Combines two dataclass configurations into a single dictionary and writes
+    it to a JSON file.
+    """
+    # Create the top-level configuration dictionary
+    config_data = {
+        "PathConfig": serialize_dataclass_to_dict(path_config),
+        "MaterialAwareTrainingConfig": serialize_dataclass_to_dict(train_config),
+    }
+
+    # Ensure the directory exists
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write the dictionary to the JSON file
+    with open(file_path, "w") as f:
+        # Use indent for human-readable output
+        json.dump(config_data, f, indent=4)
+        
+    print(f"Configuration successfully written to: {file_path.resolve()}")
+
