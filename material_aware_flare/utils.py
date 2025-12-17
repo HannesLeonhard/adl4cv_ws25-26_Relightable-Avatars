@@ -42,11 +42,8 @@ def save_extracted_channels(
             if img_tensor.shape[-1] == 1:
                 # Roughness, Specular Intensity (1 channel)
                 img_to_save = np.clip(img_tensor[..., 0], 0.0, 1.0)
-                plt.imsave(
-                    channel_dir / f"{name_idx:04d}.png", img_to_save, cmap="gray"
-                )
+                plt.imsave(channel_dir / f"{name_idx:04d}.png", img_to_save, cmap="gray")
             else:
                 # Albedo, Normal, Irradiance (3 channels)
                 img_to_save = np.clip(img_tensor, 0.0, 1.0)
                 plt.imsave(channel_dir / f"{name_idx:04d}.png", img_to_save)
-
