@@ -23,6 +23,12 @@ class PathConfig:
         if not dir.exists():
             dir.mkdir(parents=True)
         return dir
+    
+    def image_save_path(self, stage: str) -> Path:
+        dir = self.experiment_dir / stage / "images"
+        if not dir.exists():
+            dir.mkdir(parents=True)
+        return dir
 
     def meshes_save_path(self, stage: str) -> Path:
         dir = self.experiment_dir / stage / "meshes"
@@ -84,6 +90,11 @@ class MaterialAwareTrainingConfig:
 
     ghostbone: bool = True
     deform_dims: list[int] = field(default_factory=lambda: [128, 128, 128, 128])
+
+    visualization_frequency: int = 100
+    save_frequency: int = 300
+    visualization_views: list[int] = field(default_factory=lambda: [15, 25, 27, 21, 26])
+    
 
     @classmethod
     def default_stage_1_config(cls, batch_size: int, ghostbone: bool):
