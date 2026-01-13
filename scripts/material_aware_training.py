@@ -40,9 +40,8 @@ import time
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, device, dataset_train, dataloader_train, debug_views, FLAMEServer):
+def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, dataset_train, dataloader_train, FLAMEServer):
     ## ============== Dir ==============================
-    images_save_path = path_config.image_save_path(args.stage)
     meshes_save_path = path_config.meshes_save_path(args.stage)
     shaders_save_path = path_config.shaders_save_path(args.stage)
 
@@ -281,6 +280,10 @@ def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, device, dat
                     print("Decaying flame regularization")
                     loss_weights['flame_regularization'] *= 0.5
 
+            if iteration % 500 == 0:
+                print("Decaying diffusion normal regularization")
+                loss_weights["diffusion_normal"] *= 0.8
+
             losses["diffusion_normal"] = diffusion_normal_regularization(
                 gbuffers["normal"],
                 views_subset["diffusion_normal"],
@@ -350,27 +353,6 @@ def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, device, dat
                 except ValueError as e:
                     print(f"Error: {e}")
                     raise  # Raise the exception to exit the current execution of main()
-            
-            # ==============================================================================================
-            # V I S U A L I Z A T I O N S
-            # ==============================================================================================
-            if (args.visualization_frequency > 0) and (iteration == 1 or iteration % args.visualization_frequency == 0):
-                debug_rgb_pred, debug_gbuffer, debug_cbuffers = run_inference(
-                    views=debug_views,
-                    mesh=mesh,
-                    FLAMEServer=FLAMEServer,
-                    deformer_net=deformer_net,
-                    shader=shader,
-                    renderer=renderer,
-                    channels_gbuffer=channels_gbuffer,
-                    lgt=lgt,
-                    ghostbone=args.ghostbone,
-                    finetune_color=args.finetune_color,
-                )
-                ## ============== visualize ==============================
-                visualize_training(debug_rgb_pred, debug_cbuffers, debug_gbuffer, debug_views, images_save_path, iteration)
-                del debug_gbuffer, debug_cbuffers
-
 
     end = time.time()
     total_time = ((end - start) % 3600)
@@ -390,27 +372,10 @@ def material_aware_training(
     path_config: PathConfig,
     args1: MaterialAwareTrainingConfig,
     args2: MaterialAwareTrainingConfig,
+    dataset_train: DatasetLoader,
+    dataloader_train,
 ):
-    print(f"Using device {device}")
-
-    # ==============================================================================================
-    # load data
-    # ==============================================================================================
-    print("loading train views...")
-    dataset_train    = DatasetLoader(path_config, train_dir=path_config.train_dir, sample_ratio=args1.sample_idx_ratio, pre_load=True)
-    dataset_val      = DatasetLoader(path_config, train_dir=path_config.eval_dir, sample_ratio=24, pre_load=True)
-    dataloader_train    = torch.utils.data.DataLoader(dataset_train, batch_size=args1.batch_size, collate_fn=dataset_train.collate, shuffle=True, drop_last=True)
-    view_indices = np.array(args1.visualization_views).astype(int)
-    d_l = [dataset_val.__getitem__(idx) for idx in view_indices[2:]]
-    d_l.append(dataset_train.__getitem__(view_indices[0]))
-    d_l.append(dataset_train.__getitem__(view_indices[1]))
-    debug_views = dataset_val.collate(d_l)
-
-    del dataset_val
-    # ==============================================================================================
-    # Create trainables: FLAME + Renderer  + Downsample
-    # ==============================================================================================
-    ### ============== load FLAME mesh ==============================
+    ## ============== load FLAME mesh ==============================
     flame_shape = dataset_train.shape_params
     FLAMEServer = FLAME(path_config.flame_path, n_shape=100, n_exp=50, shape_params=flame_shape).to(device)
 
@@ -425,7 +390,7 @@ def material_aware_training(
 
     while True:
         try:
-            main(path_config=path_config, args=args1, device=device, dataset_train=dataset_train, dataloader_train=dataloader_train, debug_views=debug_views, FLAMEServer=FLAMEServer)
+            main(path_config=path_config, args=args1, dataset_train=dataset_train, dataloader_train=dataloader_train, FLAMEServer=FLAMEServer)
             break
         except Exception as exc:
             print("--"*50)
@@ -435,7 +400,7 @@ def material_aware_training(
 
     while True:
         try:
-            main(path_config=path_config, args=args2, device=device, dataset_train=dataset_train, dataloader_train=dataloader_train, debug_views=debug_views, FLAMEServer=FLAMEServer)
+            main(path_config=path_config, args=args2, dataset_train=dataset_train, dataloader_train=dataloader_train, FLAMEServer=FLAMEServer)
             break
         except Exception as exc:
             print("--"*50)

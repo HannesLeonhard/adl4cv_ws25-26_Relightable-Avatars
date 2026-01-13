@@ -29,6 +29,12 @@ class PathConfig:
         if not dir.exists():
             dir.mkdir(parents=True)
         return dir
+    
+    def image_eval_save_path(self, subfolder: str) -> Path:
+        dir = self.experiment_dir / "images_evaluation" / subfolder
+        if not dir.exists():
+            dir.mkdir(parents=True)
+        return dir
 
     def meshes_save_path(self, stage: str) -> Path:
         dir = self.experiment_dir / stage / "meshes"
