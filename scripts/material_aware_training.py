@@ -24,10 +24,9 @@ from flare.dataset import dataset_util
 from flare.core import Mesh, Renderer
 from flare.losses import *
 from flare.modules import NeuralShader, get_deformer_network, Displacement
-from flare.utils import AABB, read_mesh, write_mesh, visualize_training
+from flare.utils import AABB, read_mesh, write_mesh
 import nvdiffrec.render.light as light
 
-from scripts.flare_inference import run_inference
 from scripts.config import PathConfig, MaterialAwareTrainingConfig
 from scripts.material_diffusion_regularization import (
     diffusion_albedo_regularization,
@@ -176,6 +175,11 @@ def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, dataset_tra
     # ==============================================================================================
     # T R A I N I N G
     # ==============================================================================================
+    diffusion_normal_losses = []
+    diffusion_albedo_losses = []
+    diffusion_roughness_losses = []
+    diffusion_irradiance_losses = []
+
     epochs = (args.iterations // len(dataloader_train)) + 1
     iteration = 0
 
@@ -309,6 +313,11 @@ def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, dataset_tra
                 views_subset["mask"],
             )
 
+            diffusion_normal_losses.append(losses["diffusion_normal"].item())
+            diffusion_albedo_losses.append(losses["diffusion_albedo"].item())
+            diffusion_roughness_losses.append(losses["diffusion_roughness"].item())
+            diffusion_irradiance_losses.append(losses["diffusion_irradiance"].item())
+
             loss = torch.tensor(0., device=device) 
             for k, v in losses.items():
                 loss += v * loss_weights[k]
@@ -367,6 +376,8 @@ def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, dataset_tra
     displacements.save(shaders_save_path / f'displacement_latest.pt')
     deformer_net.save(shaders_save_path / f'deformer_latest.pt')
 
+    return diffusion_normal_losses, diffusion_albedo_losses, diffusion_roughness_losses, diffusion_irradiance_losses
+
 
 def material_aware_training(
     path_config: PathConfig,
@@ -388,9 +399,15 @@ def material_aware_training(
         FLAMEServer.canonical_transformations = torch.cat([torch.eye(4).unsqueeze(0).unsqueeze(0).float().to(device), FLAMEServer.canonical_transformations], 1)
     FLAMEServer.canonical_verts = FLAMEServer.canonical_verts.to(device)
 
+    diffusion_normal_losses, diffusion_albedo_losses, diffusion_roughness_losses, diffusion_irradiance_losses = [], [], [], []
+
     while True:
         try:
-            main(path_config=path_config, args=args1, dataset_train=dataset_train, dataloader_train=dataloader_train, FLAMEServer=FLAMEServer)
+            n, a, r, i = main(path_config=path_config, args=args1, dataset_train=dataset_train, dataloader_train=dataloader_train, FLAMEServer=FLAMEServer)
+            diffusion_normal_losses.extend(n)
+            diffusion_albedo_losses.extend(a)
+            diffusion_roughness_losses.extend(r)
+            diffusion_irradiance_losses.extend(i)
             break
         except Exception as exc:
             print("--"*50)
@@ -400,10 +417,16 @@ def material_aware_training(
 
     while True:
         try:
-            main(path_config=path_config, args=args2, dataset_train=dataset_train, dataloader_train=dataloader_train, FLAMEServer=FLAMEServer)
+            n, a, r, i = main(path_config=path_config, args=args2, dataset_train=dataset_train, dataloader_train=dataloader_train, FLAMEServer=FLAMEServer)
+            diffusion_normal_losses.extend(n)
+            diffusion_albedo_losses.extend(a)
+            diffusion_roughness_losses.extend(r)
+            diffusion_irradiance_losses.extend(i)
             break
         except Exception as exc:
             print("--"*50)
             print(exc)
             print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
             print("--"*50)
+
+    return diffusion_normal_losses, diffusion_albedo_losses, diffusion_roughness_losses, diffusion_irradiance_losses
