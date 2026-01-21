@@ -1,0 +1,92 @@
+config: null
+run_name: "003_test"
+batch_size: 2
+
+# paths
+input_dir: "/home/hleonhard/data/flare_subject_data/001"
+train_dir:
+  - "MVI_1814"
+  - "MVI_1810"
+eval_dir:
+  - "MVI_1812"
+working_dir: "/home/hleonhard/data/flare_train_setup"
+output_dir: "out"
+
+# misc
+sample_idx_ratio: 1
+device: 0
+finetune_color: false
+
+# iterations
+iterations: 2000
+final_iter: 1500
+upsample_iterations:
+  - 500
+save_frequency: 300
+visualization_frequency: 100
+visualization_views:
+  - 15
+  - 25
+  - 27
+  - 21
+  - 26
+downsample: false
+downsample_ratio: 0.03
+grad_scale: false
+
+# flame
+decay_flame:
+  - 100
+flame_mask: false
+flame_path: "/home/hleonhard/adl4cv_ws25-26_Relightable-Avatars/flare/flame/FLAME2020/generic_model.pkl"
+
+# learning rates
+lr_vertices: 0.001
+lr_shader: 0.001
+lr_deformer: 0.001
+
+# loss weights
+weight_mask: 2.0
+weight_normal: 0.1
+weight_laplacian: 60.0
+weight_shading: 1.0
+weight_perceptual_loss: 0.1
+weight_albedo_regularization: 0.01
+weight_flame_regularization: 10.0
+weight_white_lgt_regularization: 1.0
+weight_roughness_regularization: 0.1
+weight_fresnel_coeff: 0.01
+
+# diffusion regularization
+diffusion_dir: "/home/hleonhard/data/flare_diffusion_channels/rgbx/001"
+diffusion_normal: 0.1
+diffusion_albedo: 0.1
+diffusion_roughness: 0.1
+diffusion_irradiance: 0.1
+r_mean: 0.5
+
+# neural shader
+fourier_features: "positional"
+activation: "relu"
+bsdf: "pbr_shading"
+deform_d_out: 128
+light_mlp_ch: 3
+light_mlp_dims:
+  - 64
+  - 64
+material_mlp_dims:
+  - 128
+  - 128
+  - 128
+  - 128
+  - 128
+material_mlp_ch: 5
+
+# ghostbone / deformer
+ghostbone: true
+train_deformer: true
+deform_dims:
+  - 128
+  - 128
+  - 128
+  - 128
