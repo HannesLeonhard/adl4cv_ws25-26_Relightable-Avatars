@@ -12,6 +12,9 @@ from flare.core import Mesh, Renderer
 from flare.dataset import DatasetLoader
 from flare.modules import ForwardDeformer, NeuralShader, get_deformer_network
 from flare.utils import AABB, read_mesh
+from flare.metrics import metrics
+from scripts.util import save_img
+from scripts.config import PathConfig
 
 device = torch.device("cuda:0")
 
@@ -410,3 +413,35 @@ def to_masked_rgba(rgb_pred, mask1c):
         torch.concat([rgb_pred.cpu(), torch.ones_like(rgb_pred[..., 0:1]).cpu()], axis=3),
         mask1c.float(),
     )
+
+def evaluate(path_config: PathConfig, dataset_val, dataloader_val):
+    mesh, FLAMEServer, deformer_net, shader, renderer, channels_gbuffer, lgt = build_flare_pipeline(
+        dataset_val=dataset_val,
+        flame_path=path_config.flame_path,
+        mesh_path=path_config.experiment_dir / "stage_2/meshes/mesh_latest.obj",
+        deformer_path=path_config.experiment_dir / "stage_2/network_weights/deformer_latest.pt",
+        shader_path=path_config.experiment_dir/ "stage_2/network_weights/shader_latest.pt",
+        train_dir=path_config.train_dir,
+    )
+
+    for views in dataloader_val:
+        rgb_pred, gbuffers, cbuffers = run_inference(views, mesh, FLAMEServer, deformer_net, shader, renderer, channels_gbuffer, lgt)
+        rgb_pred = rgb_pred * gbuffers["mask"]
+        rgb_pred = rgb_pred.permute(0, 3, 1, 2)
+
+        for i in range(rgb_pred.shape[0]):
+            id = int(views["frame_name"][i])
+            mask = gbuffers["mask"][i].cpu()
+            mask = mask.permute(2, 0, 1)
+            rgba_pred = torch.cat([rgb_pred[i].cpu(), mask], dim=0)
+
+            images_save_path = path_config.image_eval_save_path("rgb")
+            save_img(rgba_pred, images_save_path / f"{id:05d}.png")
+
+    mae, lpips, ssim, psnr = metrics.run(
+        output_dir=path_config.experiment_dir / "images_evaluation",
+        gt_dir=path_config.working_dir / path_config.input_dir,
+        subfolders=path_config.eval_dir
+    )
+
+    return mae, lpips, ssim, psnr
