@@ -13,6 +13,7 @@
 # For commercial licensing contact, please contact ps-license@tuebingen.mpg.de
 
 import os
+import json
 import numpy as np
 from pathlib import Path
 from gpytoolbox import remesh_botsch
@@ -288,6 +289,7 @@ def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, dataset_tra
                 print("Decaying diffusion normal regularization")
                 loss_weights["diffusion_normal"] *= 0.8
 
+
             losses["diffusion_normal"] = diffusion_normal_regularization(
                 gbuffers["normal"],
                 views_subset["diffusion_normal"],
@@ -428,5 +430,17 @@ def material_aware_training(
             print(exc)
             print("Warning: Re-initializing main() because the training of light MLP diverged and all the values are zero. If the training does not restart, please end it and restart. ")
             print("--"*50)
+
+    with open(path_config.experiment_dir / "diffusion_regularization_losses.json", "w") as file:
+        json.dump(
+            {
+                "diffusion_normal_losses" : diffusion_normal_losses,
+                "diffusion_albedo_losses" : diffusion_albedo_losses,
+                "diffusion_roughness_losses" : diffusion_roughness_losses,
+                "diffusion_irradiance_losses" : diffusion_irradiance_losses,
+            },
+            file,
+            indent=2,
+        )
 
     return diffusion_normal_losses, diffusion_albedo_losses, diffusion_roughness_losses, diffusion_irradiance_losses
