@@ -1,7 +1,7 @@
 extend-exclude = ["*.ipynb", "typings", "flare", "rgbx", "diffusion_renderer"]
 fix = true
 target-version = "py39"
-line-length = 100
+line-length = 120
 
 [lint]
 extend-select = [

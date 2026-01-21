@@ -3,6 +3,7 @@ from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import nvdiffrec.render.light as light
 import torch
 from flame.FLAME import FLAME
@@ -40,9 +41,7 @@ def build_flare_pipeline(
         FLAMEServer.canonical_verts,
         FLAMEServer.canonical_pose_feature,
         FLAMEServer.canonical_transformations,
-    ) = FLAMEServer(
-        expression_params=FLAMEServer.canonical_exp, full_pose=FLAMEServer.canonical_pose
-    )
+    ) = FLAMEServer(expression_params=FLAMEServer.canonical_exp, full_pose=FLAMEServer.canonical_pose)
     FLAMEServer.canonical_verts = FLAMEServer.canonical_verts.to(device)
     flame_canonical_mesh.vertices = FLAMEServer.canonical_verts.squeeze(0)
 
@@ -113,12 +112,7 @@ def run_inference(
     if ghostbone:
         transformations = torch.cat(
             [
-                torch.eye(4)
-                .unsqueeze(0)
-                .unsqueeze(0)
-                .expand(views["img"].shape[0], -1, -1, -1)
-                .float()
-                .to(device),
+                torch.eye(4).unsqueeze(0).unsqueeze(0).expand(views["img"].shape[0], -1, -1, -1).float().to(device),
                 transformations,
             ],
             1,
@@ -152,6 +146,62 @@ def run_inference(
     return rgb_pred, gbuffers, cbuffers
 
 
+def run_relight(
+    views,
+    mesh: Mesh,
+    FLAMEServer: FLAME,
+    deformer_net: ForwardDeformer,
+    shader: NeuralShader,
+    renderer: Renderer,
+    channels_gbuffer: list[str],
+    lgt_list: list[light.EnvironmentLight],
+    ghostbone: bool = True,
+    finetune_color: bool = True,
+):
+    shapedirs, posedirs, lbs_weights = deformer_net.query_weights(mesh.vertices)
+    eval_vertices = mesh.vertices
+    batched_verts = eval_vertices.unsqueeze(0).repeat(views["img"].shape[0], 1, 1)
+
+    device = torch.device("cuda:0")
+
+    _, pose_features, transformations = FLAMEServer(
+        expression_params=views["flame_expression"], full_pose=views["flame_pose"]
+    )
+    if ghostbone:
+        transformations = torch.cat(
+            [
+                torch.eye(4).unsqueeze(0).unsqueeze(0).expand(views["img"].shape[0], -1, -1, -1).float().to(device),
+                transformations,
+            ],
+            1,
+        )
+    deformed_vertices = FLAMEServer.forward_pts_batch(
+        pnts_c=batched_verts,
+        betas=views["flame_expression"],
+        transformations=transformations,
+        pose_feature=pose_features,
+        shapedirs=shapedirs,
+        posedirs=posedirs,
+        lbs_weights=lbs_weights,
+        dtype=torch.float32,
+        map2_flame_original=True,
+    )
+
+    d_normals = mesh.fetch_all_normals(deformed_vertices, mesh)
+    gbuffers = renderer.render_batch(
+        views["camera"],
+        deformed_vertices.contiguous(),
+        d_normals,
+        channels=channels_gbuffer,
+        with_antialiasing=True,
+        canonical_v=mesh.vertices,
+        canonical_idx=mesh.indices,
+    )
+
+    relit_imgs, cbuffers, gbuffer_mask = shader.relight(gbuffers, views, mesh, finetune_color, lgt_list)
+    return relit_imgs, cbuffers, gbuffer_mask
+
+
 def visualize_image_batch(images: torch.Tensor, save_path: Optional[str] = None):
     bz = images.shape[0]
     images_np = images.cpu().numpy()
@@ -180,9 +230,7 @@ def visualize_image_buffers(image_dict: dict[str, torch.Tensor], save_path: Opti
     num_cols = len(keys)
     num_rows = image_dict[keys[0]].shape[0]
 
-    fig, axes = plt.subplots(
-        num_rows, num_cols, figsize=(5 * num_cols, 5 * num_rows), squeeze=False
-    )
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=(5 * num_cols, 5 * num_rows), squeeze=False)
     plt.subplots_adjust(wspace=0.05, hspace=0.05, left=0.1)
 
     for r in range(num_rows):
@@ -199,6 +247,44 @@ def visualize_image_buffers(image_dict: dict[str, torch.Tensor], save_path: Opti
 
     if save_path:
         fig.savefig(save_path)
+
+    plt.show()
+
+
+def visualize_training_losses(
+    diffusion_albedo_losses: list[float],
+    diffusion_normal_losses: list[float],
+    diffusion_roughness_losses: list[float],
+    diffusion_irradiance_losses: list[float] = None,
+    smoothing_window: int = 20,
+):
+    plt.figure(figsize=(10, 6))
+
+    diffusion_albedo_losses = pd.Series(diffusion_albedo_losses)
+    diffusion_albedo_losses_smooth = diffusion_albedo_losses.rolling(window=smoothing_window).mean()
+
+    diffusion_normal_losses = pd.Series(diffusion_normal_losses)
+    diffusion_normal_losses_smooth = diffusion_normal_losses.rolling(window=smoothing_window).mean()
+
+    diffusion_roughness_losses = pd.Series(diffusion_roughness_losses)
+    diffusion_roughness_losses_smooth = diffusion_roughness_losses.rolling(window=smoothing_window).mean()
+
+    if diffusion_irradiance_losses is not None:
+        diffusion_irradiance_losses = pd.Series(diffusion_irradiance_losses)
+        diffusion_irradiance_losses_smooth = diffusion_irradiance_losses.rolling(window=smoothing_window).mean()
+
+    plt.plot(diffusion_normal_losses_smooth, label="Normal Loss", linewidth=0.5, color="blue")
+    plt.plot(diffusion_albedo_losses_smooth, label="Albedo Loss", linewidth=0.5, color="red")
+    plt.plot(diffusion_roughness_losses_smooth, label="Roughness Loss", linewidth=0.5, color="green")
+
+    if diffusion_irradiance_losses is not None:
+        plt.plot(diffusion_irradiance_losses_smooth, label="Irradiance Losses", linewidth=0.5, color="gray")
+
+    plt.title("Diffusion Regularization Training Losses")
+    plt.xlabel("Iteration")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.grid(True, linestyle=":", alpha=0.6)
 
     plt.show()
 
@@ -247,9 +333,7 @@ def patched_flare_inference(
     patched_shader.eval()
 
     # copy from flare/modules/neuralshader.py
-    def _forward(
-        self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None
-    ):
+    def _forward(self, position, gbuffer, view_direction, mesh, light, deformed_position, skin_mask=None):
         bz, h, w, ch = position.shape
         pe_input = self.apply_pe(position=position)
 
