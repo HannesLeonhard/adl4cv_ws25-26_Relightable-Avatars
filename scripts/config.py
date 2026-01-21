@@ -80,9 +80,9 @@ class MaterialAwareTrainingConfig:
     weight_roughness_regularization: float = 0.01
     weight_white_lgt_regularization: float = 0.01
     weight_fresnel_coeff: float = 0.01
-    weight_diffusion_albedo_regularization: float = 0.0
-    weight_diffusion_normal_regularization: float = 0.0
-    weight_diffusion_roughness_regularization: float = 0.0
+    weight_diffusion_albedo_regularization: float = 0.01
+    weight_diffusion_normal_regularization: float = 0.01
+    weight_diffusion_roughness_regularization: float = 0.01
     weight_diffusion_irradiance_regularization: float = 0.0
 
     bsdf: str = "pbr_shading"
