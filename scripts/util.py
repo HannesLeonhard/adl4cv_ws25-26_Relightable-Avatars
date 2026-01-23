@@ -92,6 +92,13 @@ def save_img(img: torch.Tensor, path: str, from_linear: bool = True):
     """
 
     if from_linear:
-        img = linear_to_srgb(img)
+        if img.shape[0] == 4:
+            # RGBa
+            rgb = linear_to_srgb(img[:3])
+            alpha = img[3:4]
+            img = torch.cat([rgb, alpha], dim=0)
+        else:
+            # RGB
+            img = linear_to_srgb(img)
 
     torchvision.utils.save_image(img, path)

@@ -11,13 +11,7 @@ from .utils import convert_rgba_to_rgb_pil
 
 
 def calculate_metrics(
-    gen_pil,
-    gt_pil,
-    lpips_model,
-    lpips_transform,
-    device,
-    mask_np,
-    model_dtype=None
+    gen_pil, gt_pil, lpips_model, lpips_transform, device, mask_np, model_dtype=None
 ):
     """
     Calculates PSNR, SSIM, and LPIPS inside masked image regions.
@@ -50,7 +44,7 @@ def calculate_metrics(
             mse = diff.sum() / (mask_3c.sum() * 3 + 1e-8)
 
             if mse > 0:
-                psnr_val = 10 * np.log10(255 ** 2 / mse)
+                psnr_val = 10 * np.log10(255**2 / mse)
             else:
                 psnr_val = float("inf")
 
@@ -89,7 +83,6 @@ def calculate_metrics(
     return psnr_val, ssim_val, lpips_val
 
 
-
 @torch.no_grad()
 def extract_flare_channels(
     shader: Any,
@@ -121,9 +114,7 @@ def extract_flare_channels(
     position = gbuffer["canonical_position"]  # For material MLP (PE)
     bz, h, w, ch = position.shape
     device = shader.device
-    view_direction = torch.cat(
-        [v.center.unsqueeze(0) for v in views_subset["camera"]], dim=0
-    )
+    view_direction = torch.cat([v.center.unsqueeze(0) for v in views_subset["camera"]], dim=0)
     view_dir = view_direction[:, None, None, :]  # (B, 1, 1, 3)
 
     pe_input = shader.apply_pe(position=position)
