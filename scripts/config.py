@@ -85,6 +85,9 @@ class MaterialAwareTrainingConfig:
     weight_diffusion_roughness_regularization: float = 0.01
     weight_diffusion_irradiance_regularization: float = 0.0
 
+    diffusion_regularization_decay: float = 1.0
+    diffusion_regularization_decay_frequency: int = 500
+
     bsdf: str = "pbr_shading"
     activation: str = "relu"
     fourier_features: str = "positional"

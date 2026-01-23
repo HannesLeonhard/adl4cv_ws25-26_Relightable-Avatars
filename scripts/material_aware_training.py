@@ -285,9 +285,18 @@ def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, dataset_tra
                     print("Decaying flame regularization")
                     loss_weights['flame_regularization'] *= 0.5
 
-            if iteration % 500 == 0:
-                print("Decaying diffusion normal regularization")
-                loss_weights["diffusion_normal"] *= 0.8
+
+            if iteration % args.diffusion_regularization_decay_frequency == 0:
+                print("Decaying diffusion regularization")
+                loss_weights["diffusion_normal"] *= args.diffusion_regularization_decay
+                loss_weights["diffusion_albedo"] *= args.diffusion_regularization_decay
+                loss_weights["diffusion_roughness"] *= args.diffusion_regularization_decay
+                loss_weights["diffusion_irradiance"] *= args.diffusion_regularization_decay
+
+                print("diffusion normal regularization:", loss_weights["diffusion_normal"])
+                print("diffusion albedo regularization:", loss_weights["diffusion_albedo"])
+                print("diffusion roughness regularization:", loss_weights["diffusion_roughness"])
+                print("diffusion irradiance regularization:", loss_weights["diffusion_irradiance"])
 
 
             losses["diffusion_normal"] = diffusion_normal_regularization(
