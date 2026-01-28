@@ -40,7 +40,7 @@ import time
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, dataset_train, dataloader_train, FLAMEServer):
+def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, dataset_train, dataloader_train, FLAMEServer, diff_reg_decay_schedule = None):
     ## ============== Dir ==============================
     meshes_save_path = path_config.meshes_save_path(args.stage)
     shaders_save_path = path_config.shaders_save_path(args.stage)
@@ -184,6 +184,9 @@ def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, dataset_tra
     epochs = (args.iterations // len(dataloader_train)) + 1
     iteration = 0
 
+    iterations = epochs * len(dataloader_train)
+    print("Iterations:", iterations)
+
     progress_bar = tqdm(range(epochs))
     start = time.time()
     for epoch in progress_bar:
@@ -286,17 +289,8 @@ def main(path_config: PathConfig, args: MaterialAwareTrainingConfig, dataset_tra
                     loss_weights['flame_regularization'] *= 0.5
 
 
-            if iteration % args.diffusion_regularization_decay_frequency == 0:
-                print("Decaying diffusion regularization")
-                loss_weights["diffusion_normal"] *= args.diffusion_regularization_decay
-                loss_weights["diffusion_albedo"] *= args.diffusion_regularization_decay
-                loss_weights["diffusion_roughness"] *= args.diffusion_regularization_decay
-                loss_weights["diffusion_irradiance"] *= args.diffusion_regularization_decay
-
-                print("diffusion normal regularization:", loss_weights["diffusion_normal"])
-                print("diffusion albedo regularization:", loss_weights["diffusion_albedo"])
-                print("diffusion roughness regularization:", loss_weights["diffusion_roughness"])
-                print("diffusion irradiance regularization:", loss_weights["diffusion_irradiance"])
+            if diff_reg_decay_schedule is not None:
+                diff_reg_decay_schedule(loss_weights, iteration, iterations, args)
 
 
             losses["diffusion_normal"] = diffusion_normal_regularization(
@@ -396,6 +390,7 @@ def material_aware_training(
     args2: MaterialAwareTrainingConfig,
     dataset_train: DatasetLoader,
     dataloader_train,
+    diff_reg_decay_schedule = None
 ):
     ## ============== load FLAME mesh ==============================
     flame_shape = dataset_train.shape_params
@@ -414,7 +409,7 @@ def material_aware_training(
 
     while True:
         try:
-            n, a, r, i = main(path_config=path_config, args=args1, dataset_train=dataset_train, dataloader_train=dataloader_train, FLAMEServer=FLAMEServer)
+            n, a, r, i = main(path_config=path_config, args=args1, dataset_train=dataset_train, dataloader_train=dataloader_train, FLAMEServer=FLAMEServer, diff_reg_decay_schedule=diff_reg_decay_schedule)
             diffusion_normal_losses.extend(n)
             diffusion_albedo_losses.extend(a)
             diffusion_roughness_losses.extend(r)
@@ -428,7 +423,7 @@ def material_aware_training(
 
     while True:
         try:
-            n, a, r, i = main(path_config=path_config, args=args2, dataset_train=dataset_train, dataloader_train=dataloader_train, FLAMEServer=FLAMEServer)
+            n, a, r, i = main(path_config=path_config, args=args2, dataset_train=dataset_train, dataloader_train=dataloader_train, FLAMEServer=FLAMEServer, diff_reg_decay_schedule=diff_reg_decay_schedule)
             diffusion_normal_losses.extend(n)
             diffusion_albedo_losses.extend(a)
             diffusion_roughness_losses.extend(r)
